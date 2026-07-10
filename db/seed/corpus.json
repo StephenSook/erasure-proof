@@ -1,0 +1,19 @@
+{
+  "consent": "Every sentence below is the author's (Stephen Sookra's) own public bio line, self-consented for this demo. There is no third-party personal data. This satisfies the demo-credibility rule: the real person in the demo is the builder, using his own data.",
+  "model": "sentence-transformers/gtr-t5-base (768-dim), canonical unnormalized mean-pool embedding",
+  "memories": [
+    {
+      "id": "demo",
+      "text": "Stephen Sookra is a full-stack developer who builds on CockroachDB and AWS.",
+      "note": "The name-then-noise demo subject. Same sentence as the recorded Vec2Text golden run."
+    },
+    {
+      "id": "bio-devvit",
+      "text": "Stephen Sookra builds hackathon projects, including moderation tooling on Reddit's Devvit platform."
+    },
+    {
+      "id": "bio-focus",
+      "text": "Stephen Sookra works on agent memory, durable storage, and data-erasure compliance tooling."
+    }
+  ]
+}
