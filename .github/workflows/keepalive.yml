@@ -1,0 +1,70 @@
+# Keepalive + dead-man watch for the deployed demo (through judging, ~Sept 15).
+#
+# DORMANT until the repo variable KEEPALIVE_URL is set (done at the real deploy): every step
+# is skipped while it is empty, so this file can merge weeks before anything is live.
+#
+# Design notes (learned the hard way on prior projects):
+#  * Offset minute list, NOT */10: GitHub deprioritizes */N and :00 schedules; a */10 cron has
+#    been observed firing every 65-80 minutes. Offsets keep the real cadence close to 10 min.
+#  * The workflow being green is NOT proof the monitor is alive; the scheduler itself can
+#    stall. The dead-man ping (healthchecks.io, optional secret) alerts when pings STOP, which
+#    a self-monitoring workflow cannot do. Verify freshness by the NEWEST RUN'S AGE, not by
+#    green runs.
+#  * A failed run triggers GitHub's built-in failure email to the repo owner.
+#  * vars/secrets are repo-owner-controlled, but they still flow through env: blocks with
+#    quoting, never inline ${{ }} inside run:, per Actions injection hygiene.
+
+name: keepalive
+
+on:
+  schedule:
+    - cron: "4,14,24,34,44,54 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  KEEPALIVE_URL: ${{ vars.KEEPALIVE_URL }}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    if: vars.KEEPALIVE_URL != ''
+    steps:
+      - name: Probe /healthz (asserts db connectivity, keeps the Basic cluster warm)
+        run: |
+          set -euo pipefail
+          BODY=$(curl -sS -m 20 "$KEEPALIVE_URL/healthz")
+          echo "$BODY"
+          echo "$BODY" | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          assert d.get('ok') is True, 'api not ok'
+          assert d.get('db') is True, 'database unreachable'
+          print('healthz ok, commit', d.get('commit'))"
+
+      - name: Probe the SPA shell
+        run: |
+          set -euo pipefail
+          curl -sS -m 20 "$KEEPALIVE_URL/" | grep -qi "<!doctype html" && echo "spa ok"
+
+      - name: Dead-man ping (healthchecks.io, alerts when pings STOP)
+        if: success()
+        env:
+          PING_URL: ${{ secrets.HEALTHCHECKS_PING_URL }}
+        run: |
+          if [ -n "$PING_URL" ]; then
+            curl -fsS -m 10 --retry 3 "$PING_URL" >/dev/null && echo "dead-man ping sent"
+          else
+            echo "HEALTHCHECKS_PING_URL not set; skipping (GitHub failure email still covers hard failures)"
+          fi
+
+      - name: Dead-man failure ping
+        if: failure()
+        env:
+          PING_URL: ${{ secrets.HEALTHCHECKS_PING_URL }}
+        run: |
+          if [ -n "$PING_URL" ]; then
+            curl -fsS -m 10 --retry 3 "$PING_URL/fail" >/dev/null || true
+          fi
