@@ -47,6 +47,15 @@ SELECT seq,
 FROM decision_log
 ORDER BY seq;
 
+-- name: decision_log_leaves
+-- The decision-log row hashes in seq order, used as the leaves of the RFC 6962 Merkle transparency
+-- tree. The leaf data is the row's chain hash, so the Merkle layer sits additively over the chain.
+SELECT hash FROM decision_log ORDER BY seq;
+
+-- name: decision_log_indexed
+-- The leaves with their seq, so an inclusion proof can map a requested seq to its leaf index.
+SELECT seq, hash FROM decision_log ORDER BY seq;
+
 -- name: decision_log_verify
 -- Raw bytes needed to recompute the hash chain in Go (chain.Link): the verifier walks these in seq
 -- order and checks each stored hash against SHA-256(prev_hash || "seq|action|lawful_basis" || subject_hash).

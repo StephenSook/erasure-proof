@@ -61,6 +61,11 @@ class AnchorRequest(BaseModel):
     wrapped_key_fingerprint: str  # hex
     kms_key_arn: str
     key_state: str
+    # RFC 6962 Merkle tree over the decision log at anchor time. Signing it into the proof means
+    # each erasure proof also attests the transparency-log state it was recorded in. Empty/0 when
+    # the caller does not supply a tree (older callers), so the field is optional.
+    merkle_root: str = ""  # hex
+    tree_size: int = 0
 
 
 class VerifyRequest(BaseModel):
@@ -179,6 +184,8 @@ def create_app(cfg: settings.Settings | None = None) -> FastAPI:
             kms_key_arn=req.kms_key_arn,
             key_state=req.key_state,
             signer_public_key_pem=signer_pub_pem,
+            merkle_root_hex=req.merkle_root,
+            tree_size=req.tree_size,
         )
         signature = proof.sign_proof(signer, doc)
         body = proof.canonical_bytes(doc)

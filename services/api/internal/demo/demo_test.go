@@ -3,6 +3,7 @@ package demo_test
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/StephenSook/erasure-proof/services/api/internal/chain"
 	"github.com/StephenSook/erasure-proof/services/api/internal/demo"
+	"github.com/StephenSook/erasure-proof/services/api/internal/merkle"
 	"github.com/StephenSook/erasure-proof/services/api/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -261,6 +263,64 @@ func TestRbacDemo_RollsBackAndReportsHonestly(t *testing.T) {
 	if action != "ingest" {
 		t.Errorf("decision_log seq 1 action = %q, want ingest (probe must not mutate)", action)
 	}
+}
+
+func TestTreeHeadAndInclusion(t *testing.T) {
+	st, admin := setup(t)
+	id := seedSubject(t, admin)
+	svc := demo.New(st, stubInverter{})
+	ctx := context.Background()
+
+	prev := chain.GenesisPrevHash()
+	prev = appendDecision(t, admin, 1, id, "ingest", "gdpr_art_17", prev)
+	prev = appendDecision(t, admin, 2, id, "erasure", "gdpr_art_17", prev)
+	appendDecision(t, admin, 3, id, "ingest", "gdpr_art_17", prev)
+
+	th, err := svc.TreeHead(ctx)
+	if err != nil {
+		t.Fatalf("TreeHead: %v", err)
+	}
+	if th.TreeSize != 3 || len(th.Root) != 64 {
+		t.Fatalf("tree head = %+v, want size 3 and a 64-hex root", th)
+	}
+
+	inc, err := svc.Inclusion(ctx, 2)
+	if err != nil {
+		t.Fatalf("Inclusion: %v", err)
+	}
+	if inc.LeafIndex != 1 || inc.TreeSize != 3 {
+		t.Fatalf("inclusion = %+v, want leaf index 1 in a tree of 3", inc)
+	}
+	if inc.Root != th.Root {
+		t.Error("inclusion root must equal the tree-head root")
+	}
+
+	// Verify the audit proof exactly as a client would, with the merkle package.
+	leafHash, _ := hex.DecodeString(inc.LeafHash)
+	root, _ := hex.DecodeString(inc.Root)
+	path := make([][]byte, len(inc.AuditPath))
+	for i, p := range inc.AuditPath {
+		path[i], _ = hex.DecodeString(p)
+	}
+	if !merkle.VerifyInclusion(leafHash, inc.LeafIndex, inc.TreeSize, path, root) {
+		t.Error("the returned inclusion proof did not verify")
+	}
+	// A tampered leaf must not verify against the same path and root.
+	if merkle.VerifyInclusion(bytesRepeat(0xff, 32), inc.LeafIndex, inc.TreeSize, path, root) {
+		t.Error("a tampered leaf verified against the proof")
+	}
+
+	if _, err := svc.Inclusion(ctx, 99); !errors.Is(err, demo.ErrNotFound) {
+		t.Errorf("Inclusion(unknown seq) = %v, want ErrNotFound", err)
+	}
+}
+
+func bytesRepeat(b byte, n int) []byte {
+	out := make([]byte, n)
+	for i := range out {
+		out[i] = b
+	}
+	return out
 }
 
 func TestInversion_ProxiesGoldenRun(t *testing.T) {

@@ -38,9 +38,13 @@ def build_proof(
     kms_key_arn: str,
     key_state: str,
     signer_public_key_pem: str,
+    merkle_root_hex: str = "",
+    tree_size: int = 0,
 ) -> dict[str, Any]:
-    """Assemble the proof object. All bytes fields are hex so the proof is JSON-clean."""
-    return {
+    """Assemble the proof object. All bytes fields are hex so the proof is JSON-clean. The RFC 6962
+    Merkle root and tree size (when supplied) bind the proof to the transparency-log state, so a
+    verifier can prove any decision-log entry is included in the tree this proof signed."""
+    proof: dict[str, Any] = {
         "version": 1,
         "type": "erasure-proof",
         "subject_hash": subject_hash_hex,
@@ -53,6 +57,10 @@ def build_proof(
         "nist_condition": NIST_CONDITION,
         "signer_public_key": signer_public_key_pem,
     }
+    if merkle_root_hex:
+        proof["merkle_root"] = merkle_root_hex
+        proof["tree_size"] = tree_size
+    return proof
 
 
 def canonical_bytes(proof: dict[str, Any]) -> bytes:
