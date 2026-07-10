@@ -1,0 +1,148 @@
+// A stateful in-memory DemoApi used for standalone dev, CI, Playwright, and component tests. It
+// mirrors the intended CLOUD behaviour (e.g. the RBAC write is denied with SQLSTATE 42501), so the
+// console runs end to end without a backend. createMockClient() returns a fresh instance per caller
+// so tests never share state.
+
+import {
+  ApiError,
+  type ChainResult,
+  type DecisionRow,
+  type DemoApi,
+  type EraseResponse,
+  type InversionGoldenRun,
+  type MemoryView,
+  type ProofView,
+  type RbacResult,
+} from './types'
+
+const DEMO_SENTENCE = 'Stephen Sookra is a full-stack developer who builds on CockroachDB and AWS.'
+const FIXED_TIME = '2026-07-10T12:00:00Z'
+const FINGERPRINT = '1340345376cafe1381f214c4f7102e7aec5c6a18e3514b9b11e07121f2e52691'
+
+function goldenRun(): InversionGoldenRun {
+  return {
+    source: 'recorded',
+    disclosure:
+      'Recorded Vec2Text golden run (Modal T4). The live InvalidTag decrypt failure is the actual proof.',
+    sentence: DEMO_SENTENCE,
+    recovered_text: DEMO_SENTENCE + ' ',
+    post_erasure_text: 's'.repeat(60) + '.',
+    model: 'sentence-transformers/gtr-t5-base (768-dim), vec2text 0.0.13, transformers 4.44.2',
+    gpu: 'Modal T4 (serverless)',
+    recorded_at: '2026-07-09',
+    leak_num_steps: 50,
+    leak_sequence_beam_width: 8,
+    consent: "The sentence is the author's own public bio line (self-consented data).",
+  }
+}
+
+export function createMockClient(): DemoApi {
+  let subjectId = ''
+  let erased = false
+
+  const requireSubject = () => {
+    if (!subjectId) {
+      throw new ApiError(404, 'no memory for subject')
+    }
+  }
+
+  // The methods are async so a thrown ApiError surfaces as a rejected promise, matching the real
+  // HTTP client's contract (an error is a rejection, never a synchronous throw).
+  return {
+    async ingest() {
+      subjectId = '11111111-2222-4333-8444-555555555555'
+      erased = false
+      return { subject_id: subjectId, memory_id: 'aaaaaaaa-0000-4000-8000-000000000001' }
+    },
+    async getMemory() {
+      requireSubject()
+      const view: MemoryView = {
+        subject_id: subjectId,
+        memory_id: 'aaaaaaaa-0000-4000-8000-000000000001',
+        content_len: 74,
+        embedding_present: !erased,
+        embedding_len: 3088,
+        key_fingerprint: erased ? '' : FINGERPRINT,
+        created_at: FIXED_TIME,
+      }
+      return view
+    },
+    async getInversion() {
+      return goldenRun()
+    },
+    async erase() {
+      requireSubject()
+      if (erased) {
+        throw new ApiError(409, 'already erased')
+      }
+      erased = true
+      // These byte fields are not decoded or displayed by the console; low-entropy placeholders keep
+      // the mock free of anything a secret scanner would flag as a high-entropy key.
+      const resp: EraseResponse = {
+        result: {
+          decision_log_seq: 2,
+          subject_hash: 'mock-subject-hash',
+          wrapped_key_fingerprint: 'mock-fingerprint',
+          decision_log_head: 'mock-chain-head',
+          kms_key_arn: 'arn:aws:kms:us-east-1:000000000000:key/demo',
+          key_origin: 'GENERATE_DATA_KEY',
+        },
+        proof_ref: 's3://erasure-proof-anchors/subject/2.json',
+      }
+      return resp
+    },
+    async getProof() {
+      if (!erased) {
+        throw new ApiError(404, 'no erasure record for subject')
+      }
+      const proof: ProofView = {
+        subject_id: subjectId,
+        requested_at: FIXED_TIME,
+        committed_at: FIXED_TIME,
+        decision_log_seq: 2,
+        fingerprint: FINGERPRINT,
+        kms_key_arn: 'arn:aws:kms:us-east-1:000000000000:key/demo',
+        proof_ref: 's3://erasure-proof-anchors/subject/2.json',
+      }
+      return proof
+    },
+    async getDecisionLog() {
+      const rows: DecisionRow[] = [
+        {
+          seq: 1,
+          subject_hash: FINGERPRINT,
+          action: 'ingest',
+          lawful_basis: 'gdpr_art_17',
+          occurred_at: FIXED_TIME,
+          prev_hash: '00'.repeat(32),
+          hash: '11'.repeat(32),
+        },
+      ]
+      if (erased) {
+        rows.push({
+          seq: 2,
+          subject_hash: FINGERPRINT,
+          action: 'erasure',
+          lawful_basis: 'gdpr_art_17',
+          occurred_at: FIXED_TIME,
+          prev_hash: '11'.repeat(32),
+          hash: '22'.repeat(32),
+        })
+      }
+      return rows
+    },
+    async verifyChain() {
+      const result: ChainResult = { intact: true, checked: erased ? 2 : 1, break_at_seq: null }
+      return result
+    },
+    async rbacDemo() {
+      const result: RbacResult = {
+        attempted: "UPDATE decision_log SET action = 'tamper' WHERE seq = (SELECT max(seq) FROM decision_log)",
+        denied: true,
+        sqlstate: '42501',
+        message: 'user agent_worker does not have UPDATE privilege on relation decision_log',
+      }
+      return result
+    },
+  }
+}

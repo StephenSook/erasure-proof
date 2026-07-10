@@ -1,0 +1,99 @@
+// Response shapes returned by the Go api and the /api demo gateway. Field names match the JSON tags
+// on the server exactly (e.g. decision_log_seq, wrapped_key_fingerprint).
+
+export interface IngestResult {
+  subject_id: string
+  memory_id: string
+}
+
+export interface MemoryView {
+  subject_id: string
+  memory_id: string
+  content_len: number
+  embedding_present: boolean
+  embedding_len: number
+  key_fingerprint: string // hex; empty once the key row is erased
+  created_at: string
+}
+
+export interface EraseResult {
+  decision_log_seq: number
+  subject_hash: string // base64
+  wrapped_key_fingerprint: string // base64
+  decision_log_head: string // base64
+  kms_key_arn: string
+  key_origin: string
+}
+
+export interface EraseResponse {
+  result: EraseResult
+  proof_ref?: string
+  proof_pending?: boolean
+}
+
+export interface ProofView {
+  subject_id: string
+  requested_at: string
+  committed_at: string | null
+  decision_log_seq: number | null
+  fingerprint: string | null
+  kms_key_arn: string | null
+  proof_ref: string | null
+}
+
+export interface DecisionRow {
+  seq: number
+  subject_hash: string
+  action: string
+  lawful_basis: string
+  occurred_at: string
+  prev_hash: string
+  hash: string
+}
+
+export interface ChainResult {
+  intact: boolean
+  checked: number
+  break_at_seq: number | null
+}
+
+export interface RbacResult {
+  attempted: string
+  denied: boolean
+  sqlstate: string
+  message: string
+}
+
+export interface InversionGoldenRun {
+  sentence?: string
+  recovered_text?: string
+  post_erasure_text?: string
+  model?: string
+  gpu?: string
+  recorded_at?: string
+  consent?: string
+  note?: string
+  disclosure?: string
+  [key: string]: unknown
+}
+
+// ApiError carries the HTTP status so callers can distinguish 404 (not found yet) from real faults.
+export class ApiError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
+export interface DemoApi {
+  ingest(contentB64: string, embeddingB64: string): Promise<IngestResult>
+  getMemory(subjectId: string): Promise<MemoryView>
+  getInversion(): Promise<InversionGoldenRun>
+  erase(subjectId: string, lawfulBasis?: string): Promise<EraseResponse>
+  getProof(subjectId: string): Promise<ProofView>
+  getDecisionLog(): Promise<DecisionRow[]>
+  verifyChain(): Promise<ChainResult>
+  rbacDemo(): Promise<RbacResult>
+}
