@@ -1,0 +1,42 @@
+:root {
+  color-scheme: dark;
+
+  /* Warm near-black backgrounds (the anime.js design language). */
+  --bg-0: #1c1b1a;
+  --bg-1: #242322;
+  --bg-2: #2c2a27;
+  --bg-3: #35322e;
+
+  /* Off-white text ramp, warm. */
+  --fg-0: #f6f4f2;
+  --fg-1: #d8d4ce;
+  --fg-2: #a29c94;
+  --fg-3: #6e6860;
+
+  --line: #38352f;
+  --line-strong: #4c473f;
+
+  /* Neon accent ramp; each demo stage owns one hue. */
+  --hue-blue: #33b3f1;
+  --hue-red: #ff4b4b;
+  --hue-yellow: #ffcc2a;
+  --hue-corail: #ff7d36;
+  --hue-turquoise: #00ffaa;
+  --hue-green: #8dff55;
+  --hue-cyan: #26f2d5;
+
+  --ok: #8dff55;
+  --warn: #ffcc2a;
+  --bad: #ff4b4b;
+
+  /* Monospace-dominant, forensic-console aesthetic. Real DINish / JetBrains Mono / DSEG7 @font-face
+     arrive with the beauty layer; the system mono stack keeps the plain UI offline and CSP-safe. */
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --radius: 6px;
+  --radius-lg: 10px;
+
+  /* The current stage hue; each stage subtree overrides --hue inline. */
+  --hue: var(--hue-blue);
+}
