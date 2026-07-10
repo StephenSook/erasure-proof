@@ -82,6 +82,22 @@ tests. The managed cloud cluster is the judge-facing system of record and the on
 Managed MCP Server, the ccloud RBAC boundary, and the funded-warm cluster through judging. We
 never kill the cloud cluster's nodes and never point destructive tests at it.
 
+## Managed MCP Server and the RBAC boundaries (wired 2026-07-10)
+
+A least-privilege CockroachDB Cloud service account (CLUSTER_DEVELOPER +
+CLUSTER_OPERATOR_WRITER, both scoped to the single cluster, nothing org-wide) gives the
+project an INDEPENDENT verification path: `infra/ccloud/mcp-verify.sh` reads the decision-log
+chain head through Cockroach Labs' hosted MCP endpoint (`https://cockroachlabs.cloud/mcp`,
+select_query tool), so a verifier does not have to trust our API layer, and every call is
+audit-logged on CockroachDB Cloud's side.
+
+`infra/ccloud/rbac-demo.sh` shows the three DISTINCT denial boundaries live, never conflated:
+the control plane (same API key: HTTP 200 listing its scoped cluster, HTTP 403 on billing),
+the MCP layer (Cloud RBAC per tool call; with only CLUSTER_DEVELOPER, select_query returns
+"unauthorized", observed live before the operator grant), and the data plane (SQLSTATE 42501
+when agent_worker attempts UPDATE on the append-only decision_log, in a transaction that
+always rolls back).
+
 ## Multi-region (prepared, deliberately not enabled)
 
 `db/migrations/optional/0006_regional_by_row.sql` converts the personal-data tables
