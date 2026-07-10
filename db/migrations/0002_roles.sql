@@ -26,11 +26,12 @@ GRANT INSERT, SELECT ON agent_memory TO agent_worker;
 GRANT INSERT, SELECT ON decision_log TO agent_worker;
 REVOKE UPDATE, DELETE ON decision_log FROM agent_worker;   -- makes the log append-only to the agent
 
--- operator: executes the erasure procedure only.
+-- operator: executes the erasure procedure and the privileged provisioning path (ingest of a new
+-- subject's key + first memory). Key provisioning is deliberately NOT an agent_worker power.
 GRANT INSERT, SELECT ON decision_log TO operator;
 REVOKE UPDATE, DELETE ON decision_log FROM operator;       -- operator also cannot rewrite history
-GRANT SELECT, DELETE ON subject_keys TO operator;          -- the erasure = delete the wrapped key row
-GRANT SELECT, UPDATE ON agent_memory TO operator;          -- to NULL the live plaintext embedding
+GRANT INSERT, SELECT, DELETE ON subject_keys TO operator;  -- provision (INSERT) + erase (DELETE)
+GRANT INSERT, SELECT, UPDATE ON agent_memory TO operator;  -- provision memory + NULL the embedding
 GRANT INSERT, SELECT, UPDATE ON erasure_record TO operator;
 
 -- forensics_reader: SELECT only, everywhere, for the genuinely read-only MCP server.

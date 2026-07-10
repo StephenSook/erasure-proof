@@ -15,6 +15,7 @@ import (
 	"github.com/StephenSook/erasure-proof/services/api/internal/cryptoclient"
 	"github.com/StephenSook/erasure-proof/services/api/internal/erasure"
 	"github.com/StephenSook/erasure-proof/services/api/internal/httpapi"
+	"github.com/StephenSook/erasure-proof/services/api/internal/ingest"
 	"github.com/StephenSook/erasure-proof/services/api/internal/store"
 )
 
@@ -37,7 +38,8 @@ func main() {
 	if err := st.Ping(startCtx); err != nil {
 		log.Fatalf("database unreachable: %v", err)
 	}
-	if err := st.Q.Require(erasure.RequiredQueries...); err != nil {
+	required := append(append([]string{}, erasure.RequiredQueries...), ingest.RequiredQueries...)
+	if err := st.Q.Require(required...); err != nil {
 		log.Fatalf("query set incomplete: %v", err)
 	}
 	if st.Agent == st.Operator {
@@ -46,7 +48,8 @@ func main() {
 
 	crypto := cryptoclient.NewHTTP(cfg.CryptodURL)
 	orch := erasure.NewOrchestrator(st, crypto)
-	srv := httpapi.New(st, orch, os.Getenv("GIT_SHA"))
+	ingester := ingest.New(st, crypto)
+	srv := httpapi.New(st, orch, ingester, os.Getenv("GIT_SHA"))
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           srv.Routes(),

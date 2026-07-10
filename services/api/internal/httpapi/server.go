@@ -10,25 +10,28 @@ import (
 	"time"
 
 	"github.com/StephenSook/erasure-proof/services/api/internal/erasure"
+	"github.com/StephenSook/erasure-proof/services/api/internal/ingest"
 	"github.com/StephenSook/erasure-proof/services/api/internal/store"
 )
 
-// Server wires the store and the erasure orchestrator to HTTP handlers.
+// Server wires the store, the ingest path, and the erasure orchestrator to HTTP handlers.
 type Server struct {
-	store  *store.Store
-	orch   *erasure.Orchestrator
-	commit string // the deployed git SHA, echoed by /healthz so we can prove what is served
+	store    *store.Store
+	orch     *erasure.Orchestrator
+	ingester *ingest.Ingester
+	commit   string // the deployed git SHA, echoed by /healthz so we can prove what is served
 }
 
 // New builds a Server.
-func New(s *store.Store, orch *erasure.Orchestrator, commit string) *Server {
-	return &Server{store: s, orch: orch, commit: commit}
+func New(s *store.Store, orch *erasure.Orchestrator, ingester *ingest.Ingester, commit string) *Server {
+	return &Server{store: s, orch: orch, ingester: ingester, commit: commit}
 }
 
 // Routes returns the HTTP handler.
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
+	mux.HandleFunc("POST /memories", s.handleIngest)
 	mux.HandleFunc("POST /erase", s.handleErase)
 	return mux
 }
@@ -56,6 +59,47 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusServiceUnavailable
 	}
 	writeJSON(w, status, map[string]any{"ok": dbOK, "db": dbOK, "commit": s.commit})
+}
+
+type memoryRequest struct {
+	SubjectID string `json:"subject_id"` // optional; a new UUID is minted when empty
+	Content   string `json:"content"`    // base64 plaintext
+	Embedding string `json:"embedding"`  // base64 of the raw little-endian float32 GTR vector (768 dims)
+}
+
+func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
+	var req memoryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("httpapi: malformed memory request body: %v", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "malformed JSON body"})
+		return
+	}
+	if req.Content == "" || req.Embedding == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "content and embedding required"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	res, err := s.ingester.Ingest(ctx, req.SubjectID, req.Content, req.Embedding)
+	switch {
+	case errors.Is(err, ingest.ErrSubjectErased):
+		// Refusing to resurrect an erased subject is a deliberate guarantee, not a server fault.
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "subject erased; cannot re-add memory"})
+		return
+	case errors.Is(err, ingest.ErrAlreadyProvisioned):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "subject already provisioned"})
+		return
+	case errors.Is(err, ingest.ErrBadEmbedding), errors.Is(err, ingest.ErrBadContent):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	case err != nil:
+		log.Printf("httpapi: ingest failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "ingest failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 type eraseRequest struct {

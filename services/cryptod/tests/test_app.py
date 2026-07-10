@@ -41,6 +41,9 @@ def test_prepare_anchor_verify_flow():
     assert prepared["row_wrapped_key"]
     assert prepared["content_ciphertext"]
     assert len(bytes.fromhex(prepared["subject_key_fingerprint"])) == 32
+    # key_origin drives the Go orchestrator's imported-material kill switch; lock it so a drift in
+    # what /prepare reports fails loudly.
+    assert prepared["key_origin"] == "GENERATE_DATA_KEY"
 
     anchored = client.post(
         "/anchor",

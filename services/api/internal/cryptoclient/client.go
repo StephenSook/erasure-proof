@@ -32,6 +32,10 @@ type PrepareResponse struct {
 	SubjectKeyFingerprint string `json:"subject_key_fingerprint"`
 	RowWrappedKey         string `json:"row_wrapped_key"`
 	KMSKeyARN             string `json:"kms_key_arn"`
+	// KeyOrigin is how cryptod made the subject key ('GENERATE_DATA_KEY' | 'IMPORTED_MATERIAL'). It
+	// is stored verbatim because the erasure path branches on it for the imported-material kill
+	// switch; the ingest layer must not assume it.
+	KeyOrigin string `json:"key_origin"`
 }
 
 // ShredResponse reports the imported-material kill switch outcome.

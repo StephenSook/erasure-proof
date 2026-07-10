@@ -130,6 +130,10 @@ def create_app(cfg: settings.Settings | None = None) -> FastAPI:
             "subject_key_fingerprint": hashlib.sha256(subject.wrapped).hexdigest(),
             "row_wrapped_key": _b64e(row_material.wrapped),
             "kms_key_arn": cfg.kms_wrapping_key_arn,
+            # The origin the key was made with. /prepare always uses GenerateDataKey today; the
+            # orchestrator branches on this for the imported-material kill switch, so it is reported
+            # explicitly rather than inferred downstream.
+            "key_origin": "GENERATE_DATA_KEY",
         }
 
     @app.post("/shred")

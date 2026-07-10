@@ -1,5 +1,11 @@
 -- Named statements for the agent-memory write and retrieval path (agent_worker role).
 
+-- name: insert_subject_key
+-- Provision a subject: store the KMS-wrapped subject key exactly once. Run on the provisioning
+-- (operator) path, not the agent, so the agent role never touches keys.
+INSERT INTO subject_keys (subject_id, wrapped_key, kms_key_arn, key_origin, wrapped_key_fingerprint)
+VALUES ($1, $2, $3, $4, $5);
+
 -- name: insert_memory
 -- Store an encrypted memory row: ciphertext content and embedding, the live plaintext vector for
 -- C-SPANN search, nonces, and the per-row data key wrapped under the subject key.
