@@ -127,3 +127,27 @@ func (c *HTTP) Anchor(ctx context.Context, req AnchorRequest) (AnchorResponse, e
 	err := c.post(ctx, "/anchor", req, &out)
 	return out, err
 }
+
+// Invert fetches the recorded Vec2Text golden run (GET /invert) for the demo gateway. It is not part
+// of the core Client interface (the orchestrator and reconciler do not need it); the demo package
+// depends on a narrow Inverter interface that *HTTP satisfies.
+func (c *HTTP) Invert(ctx context.Context) (map[string]any, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/invert", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("cryptod /invert: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("cryptod /invert: status %d: %s", resp.StatusCode, snippet)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
