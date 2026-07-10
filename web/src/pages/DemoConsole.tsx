@@ -1,11 +1,14 @@
-import { type CSSProperties } from 'react'
+import { useEffect, useRef, type CSSProperties } from 'react'
 import { Badge } from '../components/Badge'
 import { CodeBlock } from '../components/CodeBlock'
 import { KeyValue } from '../components/KeyValue'
+import { LcdCounter } from '../components/LcdCounter'
 import { Stage } from '../components/Stage'
 import { StatusDot } from '../components/StatusDot'
 import { demoMemory } from '../data/demoMemory'
 import { STAGES, type StageId, type StageMeta } from '../demoStages'
+import { pulseStageBar, revealResults, revealStages, scrambleIn } from '../fx'
+import { motionEnabled } from '../motion'
 import { useDemo } from '../useDemo'
 
 type StyleWithVars = CSSProperties & Record<`--${string}`, string>
@@ -16,7 +19,11 @@ const short = (s: string | null | undefined, n = 20): string =>
 const isMock = import.meta.env.VITE_USE_MOCK === '1'
 
 function scrollToStage(id: StageId) {
-  document.getElementById(`stage-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  // An explicit 'smooth' request overrides the OS reduced-motion setting, so gate it too.
+  document.getElementById(`stage-${id}`)?.scrollIntoView({
+    behavior: motionEnabled() ? 'smooth' : 'auto',
+    block: 'start',
+  })
 }
 
 export function DemoConsole() {
@@ -45,6 +52,42 @@ export function DemoConsole() {
   }
 
   const busy = Object.values(state.status).some((s) => s === 'running')
+
+  // Motion (presentation only; every effect is a no-op under reduced motion / ?minimal=1 / tests).
+  const panelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (panelRef.current) {
+      revealStages(panelRef.current)
+    }
+  }, [])
+
+  // On each stage completing, flare its bar, stagger its results in, and scramble-in any value
+  // marked data-scramble (the leak's recovered text, the erase after-state). Completion is detected
+  // via the monotonic doneSeq counter, not status diffing, because React can batch the running and
+  // done status updates into one commit and hide the transition. Results render in the same commit
+  // that bumps doneSeq, so the elements exist by the time this effect runs.
+  const prevSeq = useRef(state.doneSeq)
+  useEffect(() => {
+    const prev = prevSeq.current
+    prevSeq.current = state.doneSeq
+    for (const id of Object.keys(state.doneSeq) as StageId[]) {
+      if (state.doneSeq[id] > prev[id]) {
+        const el = document.getElementById(`stage-${id}`)
+        if (el) {
+          pulseStageBar(el)
+          revealResults(el)
+          el.querySelectorAll<HTMLElement>('[data-scramble]').forEach((n) => scrambleIn(n))
+        }
+      }
+    }
+  }, [state.doneSeq])
+
+  // The LCD instrument strip readouts.
+  const latestMemory = state.memoryAfter ?? state.memory
+  const lcdEmbed = state.memory ? String(state.memory.embedding_len) : '----'
+  const lcdKey = latestMemory ? (latestMemory.key_fingerprint ? 'ON' : 'OFF') : '--'
+  const lcdSeq = state.erase ? String(state.erase.result.decision_log_seq) : '--'
+  const lcdChain = state.chain ? (state.chain.intact ? 'OK' : 'ERR') : '--'
 
   function body(meta: StageMeta) {
     const st = state.status[meta.id]
@@ -106,7 +149,7 @@ export function DemoConsole() {
             <>
               <KeyValue
                 items={[
-                  { k: 'recovered text', v: <b className="kv__v--bad">{String(state.inversion.recovered_text ?? '')}</b>, tone: 'bad' },
+                  { k: 'recovered text', v: String(state.inversion.recovered_text ?? ''), tone: 'bad', scramble: true },
                   { k: 'from sentence', v: String(state.inversion.sentence ?? '') },
                   { k: 'model', v: String(state.inversion.model ?? '') },
                   { k: 'gpu', v: String(state.inversion.gpu ?? '') },
@@ -155,8 +198,8 @@ export function DemoConsole() {
             {state.memoryAfter && (
               <KeyValue
                 items={[
-                  { k: 'live vector', v: state.memoryAfter.embedding_present ? 'STILL PRESENT' : 'purged to NULL', tone: state.memoryAfter.embedding_present ? 'bad' : 'ok' },
-                  { k: 'subject key', v: state.memoryAfter.key_fingerprint ? 'STILL PRESENT' : 'destroyed (row gone)', tone: state.memoryAfter.key_fingerprint ? 'bad' : 'ok' },
+                  { k: 'live vector', v: state.memoryAfter.embedding_present ? 'STILL PRESENT' : 'purged to NULL', tone: state.memoryAfter.embedding_present ? 'bad' : 'ok', scramble: true },
+                  { k: 'subject key', v: state.memoryAfter.key_fingerprint ? 'STILL PRESENT' : 'destroyed (row gone)', tone: state.memoryAfter.key_fingerprint ? 'bad' : 'ok', scramble: true },
                 ]}
               />
             )}
@@ -260,7 +303,13 @@ export function DemoConsole() {
         {isMock && <div className="rail__title" style={{ paddingTop: '10px' }}>mock data (no backend)</div>}
       </nav>
 
-      <div className="panel">
+      <div className="panel" ref={panelRef}>
+        <div className="lcd-strip">
+          <LcdCounter label="embed bytes" value={lcdEmbed} width={4} />
+          <LcdCounter label="subject key" value={lcdKey} family="14" width={3} />
+          <LcdCounter label="erase seq" value={lcdSeq} width={3} />
+          <LcdCounter label="chain" value={lcdChain} family="14" width={3} />
+        </div>
         {STAGES.map((meta) => (
           <div key={meta.id} style={{ marginBottom: '18px' }}>
             <Stage meta={meta} status={state.status[meta.id]}>

@@ -1,0 +1,25 @@
+/* DINish (SIL OFL 1.1, self-hosted from github.com/playbeing/dinish; license alongside the files).
+   JetBrains Mono and DSEG7/DSEG14 Classic are imported from their @fontsource packages in main.tsx.
+   Everything is bundled by Vite: no CDN, no external font hosts. */
+
+@font-face {
+  font-family: 'DINish';
+  src: url('../assets/fonts/dinish/DINish-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'DINish';
+  src: url('../assets/fonts/dinish/DINish-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'DINish Condensed';
+  src: url('../assets/fonts/dinish/DINishCondensed-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}

@@ -25,12 +25,24 @@ export interface DemoState {
   rbac?: RbacResult
   status: Record<StageId, StageStatus>
   error: Partial<Record<StageId, string>>
+  // Monotonic per-stage completion counter. React can batch the 'running' and 'done' status updates
+  // into one commit (fast mocks resolve in microtasks), so completion effects diff this counter, not
+  // the committed status snapshots, to never miss a run.
+  doneSeq: Record<StageId, number>
 }
 
 const idleStatus = (): Record<StageId, StageStatus> =>
   Object.fromEntries(STAGES.map((s) => [s.id, 'idle'])) as Record<StageId, StageStatus>
 
-const initialState = (): DemoState => ({ subjectId: '', status: idleStatus(), error: {} })
+const zeroSeq = (): Record<StageId, number> =>
+  Object.fromEntries(STAGES.map((s) => [s.id, 0])) as Record<StageId, number>
+
+const initialState = (): DemoState => ({
+  subjectId: '',
+  status: idleStatus(),
+  error: {},
+  doneSeq: zeroSeq(),
+})
 
 export function useDemo(injected?: DemoApi) {
   // Lazy init: getClient() runs once, not on every render (React keeps only the first useRef value,
@@ -54,6 +66,7 @@ export function useDemo(injected?: DemoApi) {
           ...p,
           status: { ...s.status, [id]: 'done' },
           error: { ...s.error, [id]: undefined },
+          doneSeq: { ...s.doneSeq, [id]: s.doneSeq[id] + 1 },
         }))
       } catch (e) {
         setStatus(id, 'error', e instanceof Error ? e.message : String(e))
