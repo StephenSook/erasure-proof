@@ -74,6 +74,12 @@ class VerifyRequest(BaseModel):
     public_key_pem: str
 
 
+class LiveInvertRequest(BaseModel):
+    embedding: str  # base64 of the raw float32 GTR vector bytes (3072 bytes)
+    num_steps: int = 50
+    sequence_beam_width: int = 8
+
+
 def _load_signer(cfg: settings.Settings) -> ec.EllipticCurvePrivateKey:
     if cfg.ecdsa_signing_key_path:
         with open(cfg.ecdsa_signing_key_path, "rb") as f:
@@ -113,6 +119,34 @@ def create_app(cfg: settings.Settings | None = None) -> FastAPI:
             return inversion.recorded_golden_run()
         except FileNotFoundError as e:
             raise HTTPException(503, "recorded golden run not available") from e
+
+    @app.get("/invert/config")
+    def invert_config() -> dict:
+        """Whether live GPU inversion is available, so the UI can show or hide the live button."""
+        return {"live_available": bool(cfg.modal_invert_url and cfg.modal_invert_secret)}
+
+    @app.post("/invert/live")
+    def invert_live(req: LiveInvertRequest) -> dict:
+        """Invert an embedding on the Modal T4 GPU, live. Falls back to the recorded golden run
+        (with source="recorded_golden_run") if the worker is unconfigured or unreachable, so the
+        demo never hard-fails; the honest source label always tells the viewer which path ran."""
+        try:
+            return inversion.live_inversion(
+                req.embedding,
+                modal_url=cfg.modal_invert_url,
+                modal_secret=cfg.modal_invert_secret,
+                num_steps=req.num_steps,
+                sequence_beam_width=req.sequence_beam_width,
+            )
+        except inversion.LiveInversionUnavailable as exc:
+            log.warning("live inversion unavailable, falling back to recorded: %s", exc)
+            try:
+                fallback = inversion.recorded_golden_run()
+            except FileNotFoundError as e:
+                raise HTTPException(503, "live inversion unavailable and no recorded run") from e
+            fallback["fell_back"] = True
+            fallback["fallback_reason"] = str(exc)
+            return fallback
 
     @app.post("/prepare")
     def prepare(req: PrepareRequest) -> dict:

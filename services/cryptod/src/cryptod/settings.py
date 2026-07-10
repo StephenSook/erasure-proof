@@ -14,6 +14,11 @@ class Settings:
     s3_object_lock_mode: str  # GOVERNANCE (dev) or COMPLIANCE (prod)
     s3_retain_days: int
     ecdsa_signing_key_path: str  # dev only; production uses SSM SecureString or KMS asymmetric sign
+    # Live Vec2Text inversion (Modal T4). When both are set, /invert/live calls the GPU worker;
+    # otherwise the endpoint falls back to the recorded golden run with an honest source label.
+    # Defaulted so the live path is purely additive to existing configs.
+    modal_invert_url: str = ""
+    modal_invert_secret: str = ""
 
 
 def load() -> Settings:
@@ -26,4 +31,6 @@ def load() -> Settings:
         s3_object_lock_mode=os.getenv("S3_PROOF_OBJECT_LOCK_MODE", "GOVERNANCE"),
         s3_retain_days=int(os.getenv("S3_PROOF_RETAIN_DAYS", "1")),
         ecdsa_signing_key_path=os.getenv("ECDSA_SIGNING_KEY_PATH", ""),
+        modal_invert_url=os.getenv("MODAL_INVERT_URL", ""),
+        modal_invert_secret=os.getenv("MODAL_INVERT_SECRET", ""),
     )

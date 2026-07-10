@@ -132,6 +132,96 @@ def test_verify_rejects_malformed_input():
     assert r.status_code == 400
 
 
+def _plain_cfg(**over):
+    base = dict(
+        aws_region="us-east-1",
+        kms_wrapping_key_arn="",
+        s3_proof_bucket="proofs",
+        s3_object_lock_mode="GOVERNANCE",
+        s3_retain_days=1,
+        ecdsa_signing_key_path="",
+    )
+    base.update(over)
+    return settings.Settings(**base)
+
+
+def test_invert_config_reports_live_availability():
+    # Unconfigured: no live path.
+    off = TestClient(create_app(_plain_cfg()))
+    assert off.get("/invert/config").json()["live_available"] is False
+    # Both set: live path advertised.
+    on = TestClient(
+        create_app(_plain_cfg(modal_invert_url="https://x.modal.run", modal_invert_secret="s"))  # noqa: S106
+    )
+    assert on.get("/invert/config").json()["live_available"] is True
+
+
+def test_invert_live_falls_back_to_recorded_when_unconfigured():
+    # No Modal config: /invert/live must NOT hard-fail; it returns the recorded run, flagged.
+    client = TestClient(create_app(_plain_cfg()))
+    import base64
+
+    emb = base64.b64encode(b"\x00" * 3072).decode()
+    r = client.post("/invert/live", json={"embedding": emb})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["source"] == "recorded_golden_run"
+    assert body["fell_back"] is True
+    assert "not configured" in body["fallback_reason"]
+
+
+def test_invert_live_calls_worker_and_labels_source(monkeypatch):
+    # Configured: /invert/live calls the worker and returns source=live_gpu with input_sha256.
+    from cryptod import inversion
+
+    def fake_urlopen(req, timeout=0):
+        import io
+        import json as _json
+
+        payload = _json.loads(req.data.decode())
+        assert payload["secret"] == "test-secret"  # noqa: S105
+        body = _json.dumps(
+            {
+                "source": "live_gpu",
+                "recovered_text": "the recovered name",
+                "seconds": 12.3,
+                "device": "cuda",
+                "input_sha256": "ab" * 32,
+                "num_steps": payload["num_steps"],
+                "sequence_beam_width": payload["sequence_beam_width"],
+            }
+        ).encode()
+
+        class _Resp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        return _Resp(body)
+
+    monkeypatch.setattr(inversion.urllib.request, "urlopen", fake_urlopen)
+    live_cfg = _plain_cfg(
+        modal_invert_url="https://x.modal.run",
+        modal_invert_secret="test-secret",  # noqa: S106
+    )
+    client = TestClient(create_app(live_cfg))
+    import base64
+
+    emb = base64.b64encode(b"\x11" * 3072).decode()
+    r = client.post(
+        "/invert/live", json={"embedding": emb, "num_steps": 30, "sequence_beam_width": 4}
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["source"] == "live_gpu"
+    assert body["recovered_text"] == "the recovered name"
+    assert body["input_sha256"] == "ab" * 32
+    assert body["num_steps"] == 30
+    assert "fell_back" not in body
+
+
 @mock_aws
 def test_prepare_two_level_envelope_and_erasure():
     import base64 as b64
