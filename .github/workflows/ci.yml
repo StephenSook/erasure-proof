@@ -24,9 +24,11 @@ jobs:
           fi
           echo "ai-tone clean"
       - name: Secret scan (gitleaks, full history)
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Run the binary directly (no GitHub API, no PR-comment permissions) so it works on a
+        # private repo with the default read-only token. `detect` scans the full git history.
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/gitleaks/gitleaks:latest \
+            detect --redact --no-banner
 
   db-smoke:
     runs-on: ubuntu-latest
@@ -53,15 +55,20 @@ jobs:
           done
       - name: Append-only decision log holds against agent_worker
         run: |
-          # agent_worker must NOT be able to UPDATE or DELETE decision_log; INSERT must succeed.
-          docker exec -i crdb ./cockroach sql --insecure -d erasure <<'SQL'
+          # As agent_worker: INSERT must succeed (append), UPDATE and DELETE must be denied.
+          # Byte literals (x'..') avoid sha256() which returns a hex string, not BYTES.
+          echo "-- agent_worker INSERT should succeed --"
+          docker exec -i crdb ./cockroach sql --insecure -d erasure -u agent_worker <<'SQL'
           INSERT INTO decision_log (seq, subject_hash, action, lawful_basis, prev_hash, hash)
-            VALUES (1, sha256('s'::BYTES), 'ingest', 'gdpr_art_17', b'\x00', sha256('h'::BYTES));
+            VALUES (1, x'0011', 'ingest', 'gdpr_art_17', x'00', x'0022');
           SQL
-          echo "-- expect a permission error on UPDATE as agent_worker --"
-          if docker exec -i crdb ./cockroach sql --insecure -d erasure -u agent_worker \
-              -e "UPDATE decision_log SET action = 'tamper' WHERE seq = 1" 2>&1 | tee /tmp/o | grep -qi "permission\|denied\|does not have"; then
-            echo "append-only UPDATE correctly denied to agent_worker"
-          else
-            echo "::error::agent_worker was able to UPDATE decision_log"; cat /tmp/o; exit 1
-          fi
+          for op in "UPDATE decision_log SET action = 'tamper' WHERE seq = 1" \
+                    "DELETE FROM decision_log WHERE seq = 1"; do
+            echo "-- expect a permission error: $op --"
+            if docker exec -i crdb ./cockroach sql --insecure -d erasure -u agent_worker \
+                -e "$op" 2>&1 | tee /tmp/o | grep -qi "permission\|denied\|does not have"; then
+              echo "correctly denied to agent_worker"
+            else
+              echo "::error::agent_worker was able to run: $op"; cat /tmp/o; exit 1
+            fi
+          done
