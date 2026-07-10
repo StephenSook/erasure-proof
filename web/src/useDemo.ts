@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   type ChainResult,
   type DecisionRow,
@@ -39,6 +39,9 @@ export interface DemoState {
   memWriterStatus: 'idle' | 'running' | 'done' | 'error'
   memWriterError?: string
   memWriterAvailable?: boolean
+  // Live decision-log timeline, fed by the CockroachDB changefeed over SSE.
+  streamRows: DecisionRow[]
+  streamStatus: 'connecting' | 'live' | 'snapshot' | 'error'
   erase?: EraseResponse
   proof?: ProofView
   decisionLog?: DecisionRow[]
@@ -65,6 +68,8 @@ const initialState = (): DemoState => ({
   liveStatus: 'idle',
   agentStatus: 'idle',
   memWriterStatus: 'idle',
+  streamRows: [],
+  streamStatus: 'connecting',
   status: idleStatus(),
   error: {},
   doneSeq: zeroSeq(),
@@ -297,6 +302,24 @@ export function useDemo(injected?: DemoApi) {
     clientRef.current = injected ?? getClient()
     setState(initialState())
   }, [injected])
+
+  // Subscribe to the live decision-log stream for the whole session. Rows appear as stages run; the
+  // snapshot seeds history. Deduped and ordered by seq. Cleaned up on unmount.
+  useEffect(() => {
+    const client = clientRef.current!
+    const mergeRow = (rows: DecisionRow[], row: DecisionRow): DecisionRow[] => {
+      if (rows.some((r) => r.seq === row.seq)) return rows
+      return [...rows, row].sort((a, b) => a.seq - b.seq)
+    }
+    const unsub = client.subscribeErasureStream({
+      onSnapshot: (rows, live) =>
+        setState((s) => ({ ...s, streamRows: rows, streamStatus: live ? 'live' : 'snapshot' })),
+      onRow: (row) =>
+        setState((s) => ({ ...s, streamRows: mergeRow(s.streamRows, row), streamStatus: 'live' })),
+      onError: () => setState((s) => ({ ...s, streamStatus: 'error' })),
+    })
+    return unsub
+  }, [])
 
   const actions = useMemo(
     () => ({

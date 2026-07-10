@@ -46,6 +46,8 @@ for i in $(seq 1 40); do
   sleep 1
 done
 docker exec "$CONTAINER" ./cockroach sql --insecure -e "CREATE DATABASE IF NOT EXISTS erasure" >/dev/null
+# Core changefeeds (the live decision-log SSE stream) need rangefeeds enabled.
+docker exec "$CONTAINER" ./cockroach sql --insecure -e "SET CLUSTER SETTING kv.rangefeed.enabled = true" >/dev/null
 for f in db/migrations/0*.sql; do
   echo "   applying $f"
   docker exec -i "$CONTAINER" ./cockroach sql --insecure -d erasure < "$f" >/dev/null

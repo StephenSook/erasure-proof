@@ -364,23 +364,7 @@ export function DemoConsole() {
                 ]}
               />
             )}
-            {state.decisionLog && state.decisionLog.length > 0 && (
-              <div className="chain">
-                {state.decisionLog.map((r) => (
-                  <div className="chain__row" key={r.seq}>
-                    <div className="chain__seq">#{r.seq}</div>
-                    <div>
-                      <div>
-                        {r.action} <span className="muted">/ {r.lawful_basis}</span>
-                      </div>
-                      <div className="chain__hash">
-                        {short(r.prev_hash, 12)} <span className="chain__link">-&gt;</span> {short(r.hash, 12)}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            {liveTimeline()}
             {state.rbac && (
               <>
                 <CodeBlock>{state.rbac.attempted}</CodeBlock>
@@ -401,6 +385,45 @@ export function DemoConsole() {
           </>
         )
     }
+  }
+
+  function liveTimeline() {
+    const rows = state.streamRows
+    const badge =
+      state.streamStatus === 'live'
+        ? { kind: 'live' as const, text: 'Live (CockroachDB changefeed)' }
+        : state.streamStatus === 'snapshot'
+          ? { kind: 'recorded' as const, text: 'Snapshot (changefeed not wired)' }
+          : state.streamStatus === 'error'
+            ? { kind: 'recorded' as const, text: 'Stream reconnecting' }
+            : { kind: 'recorded' as const, text: 'Connecting...' }
+    return (
+      <div className="live-leak">
+        <div className="live-leak__head">
+          <Badge kind={badge.kind}>{badge.text}</Badge>
+          <span className="muted">decision log, streamed as it grows</span>
+        </div>
+        {rows.length > 0 ? (
+          <div className="chain">
+            {rows.map((r) => (
+              <div className="chain__row" key={r.seq}>
+                <div className="chain__seq">#{r.seq}</div>
+                <div>
+                  <div>
+                    {r.action} <span className="muted">/ {r.lawful_basis}</span>
+                  </div>
+                  <div className="chain__hash">
+                    {short(r.prev_hash, 12)} <span className="chain__link">-&gt;</span> {short(r.hash, 12)}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="note">No decision-log rows yet. Run the loop and watch them append here.</div>
+        )}
+      </div>
+    )
   }
 
   function forensicsAgentPanel() {

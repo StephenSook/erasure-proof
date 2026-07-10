@@ -21,6 +21,7 @@ import {
   type MemoryWriterResult,
   type ProofView,
   type RbacResult,
+  type StreamHandlers,
   type TreeHead,
 } from './types'
 
@@ -83,6 +84,27 @@ export function createMockClient(): DemoApi {
   let signerPem = ''
   let mockHead = ''
   let mockRoot = ''
+  const streamListeners = new Set<StreamHandlers>()
+
+  const ingestRow = (): DecisionRow => ({
+    seq: 1,
+    subject_hash: FINGERPRINT,
+    action: 'ingest',
+    lawful_basis: 'gdpr_art_17',
+    occurred_at: FIXED_TIME,
+    prev_hash: '00'.repeat(32),
+    hash: '11'.repeat(32),
+  })
+  const erasureRow = (): DecisionRow => ({
+    seq: 2,
+    subject_hash: FINGERPRINT,
+    action: 'erasure',
+    lawful_basis: 'gdpr_art_17',
+    occurred_at: FIXED_TIME,
+    prev_hash: '11'.repeat(32),
+    hash: '22'.repeat(32),
+  })
+  const currentLog = (): DecisionRow[] => (erased ? [ingestRow(), erasureRow()] : [ingestRow()])
 
   const requireSubject = () => {
     if (!subjectId) {
@@ -218,6 +240,8 @@ export function createMockClient(): DemoApi {
       const signed = await signMockProof(proofBody)
       proofSignature = signed.signature
       signerPem = signed.pem
+      // Push the new erasure row to any live-timeline subscribers.
+      streamListeners.forEach((l) => l.onRow(erasureRow()))
       // These byte fields are not decoded or displayed by the console; low-entropy placeholders keep
       // the mock free of anything a secret scanner would flag as a high-entropy key.
       const resp: EraseResponse = {
@@ -252,29 +276,14 @@ export function createMockClient(): DemoApi {
       return proof
     },
     async getDecisionLog() {
-      const rows: DecisionRow[] = [
-        {
-          seq: 1,
-          subject_hash: FINGERPRINT,
-          action: 'ingest',
-          lawful_basis: 'gdpr_art_17',
-          occurred_at: FIXED_TIME,
-          prev_hash: '00'.repeat(32),
-          hash: '11'.repeat(32),
-        },
-      ]
-      if (erased) {
-        rows.push({
-          seq: 2,
-          subject_hash: FINGERPRINT,
-          action: 'erasure',
-          lawful_basis: 'gdpr_art_17',
-          occurred_at: FIXED_TIME,
-          prev_hash: '11'.repeat(32),
-          hash: '22'.repeat(32),
-        })
-      }
-      return rows
+      return currentLog()
+    },
+    subscribeErasureStream(handlers) {
+      // The mock has no changefeed; emit the current log as a snapshot (live=false) and push the
+      // erasure row when erase() runs, so the timeline animates in local dev too.
+      handlers.onSnapshot(currentLog(), false)
+      streamListeners.add(handlers)
+      return () => streamListeners.delete(handlers)
     },
     async verifyChain() {
       const result: ChainResult = { intact: true, checked: erased ? 2 : 1, break_at_seq: null }

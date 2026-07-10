@@ -18,22 +18,29 @@ import (
 	"github.com/StephenSook/erasure-proof/services/api/internal/erasure"
 	"github.com/StephenSook/erasure-proof/services/api/internal/ingest"
 	"github.com/StephenSook/erasure-proof/services/api/internal/store"
+	"github.com/StephenSook/erasure-proof/services/api/internal/stream"
 )
 
 // Server wires the store, the ingest path, the erasure orchestrator, and the read-only demo gateway
 // to HTTP handlers.
 type Server struct {
-	store    *store.Store
-	orch     *erasure.Orchestrator
-	ingester *ingest.Ingester
-	demo     *demo.Service
-	commit   string // the deployed git SHA, echoed by /healthz so we can prove what is served
+	store     *store.Store
+	orch      *erasure.Orchestrator
+	ingester  *ingest.Ingester
+	demo      *demo.Service
+	commit    string // the deployed git SHA, echoed by /healthz so we can prove what is served
+	streamHub *stream.Hub
 }
 
 // New builds a Server.
 func New(s *store.Store, orch *erasure.Orchestrator, ingester *ingest.Ingester, dsvc *demo.Service, commit string) *Server {
 	return &Server{store: s, orch: orch, ingester: ingester, demo: dsvc, commit: commit}
 }
+
+// SetStreamHub wires the live decision-log changefeed feed for the SSE endpoint. Called at boot when
+// the changefeed consumer is started; leaving it unset makes /api/erasure-stream serve only the
+// current snapshot (no live updates).
+func (s *Server) SetStreamHub(h *stream.Hub) { s.streamHub = h }
 
 // Routes returns the HTTP handler.
 func (s *Server) Routes() http.Handler {
@@ -53,6 +60,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/tree-head", s.handleDemoTreeHead)
 	mux.HandleFunc("GET /api/inclusion", s.handleDemoInclusion)
 	mux.HandleFunc("GET /api/consistency", s.handleDemoConsistency)
+	mux.HandleFunc("GET /api/erasure-stream", s.handleErasureStream)
 	mux.HandleFunc("GET /api/agent/config", s.handleAgentConfig)
 	mux.HandleFunc("POST /api/agent/forensics", s.handleAgentForensics)
 	mux.HandleFunc("POST /api/agent/memory-writer", s.handleAgentMemoryWriter)
@@ -384,6 +392,81 @@ func (s *Server) handleDemoInversionLive(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
+}
+
+// handleErasureStream is a Server-Sent Events endpoint: it sends the current decision log as a
+// "snapshot" event, then streams each newly appended row as a "row" event, fed by the CockroachDB
+// changefeed. A ":keepalive" comment every 25s keeps proxies from timing the connection out. The
+// changefeed carries no personal data (subject_hash is a SHA-256).
+func (s *Server) handleErasureStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "streaming unsupported"})
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	// Disable proxy buffering (nginx/ALB) so events flush immediately.
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	ctx := r.Context()
+	// Snapshot the current log first so a fresh console shows history, then stream live rows. The
+	// changefeed uses no_initial_scan, so there is no overlap or double-send.
+	snapCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	rows, err := s.demo.DecisionLog(snapCtx)
+	cancel()
+	if err != nil {
+		log.Printf("httpapi: stream snapshot failed: %v", err)
+		rows = nil
+	}
+	writeSSE(w, "snapshot", map[string]any{"rows": rows, "live": s.streamHub != nil})
+	flusher.Flush()
+
+	if s.streamHub == nil {
+		// No changefeed wired: the snapshot is all we have. Close cleanly.
+		return
+	}
+	ch, unsubscribe, ok := s.streamHub.Subscribe()
+	if !ok {
+		writeSSE(w, "error", map[string]string{"error": "too many live viewers; showing the snapshot only"})
+		flusher.Flush()
+		return
+	}
+	defer unsubscribe()
+
+	keepalive := time.NewTicker(25 * time.Second)
+	defer keepalive.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, open := <-ch:
+			if !open {
+				return
+			}
+			writeSSE(w, "row", ev)
+			flusher.Flush()
+		case <-keepalive.C:
+			if _, err := w.Write([]byte(":keepalive\n\n")); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+// writeSSE writes one named Server-Sent Event with a JSON data payload.
+func writeSSE(w http.ResponseWriter, event string, data any) {
+	payload, err := json.Marshal(data)
+	if err != nil {
+		return
+	}
+	// The status line was already sent; a write error means the client left, which the caller's
+	// next Write/Flush will also surface.
+	_, _ = w.Write([]byte("event: " + event + "\ndata: "))
+	_, _ = w.Write(payload)
+	_, _ = w.Write([]byte("\n\n"))
 }
 
 func (s *Server) handleAgentConfig(w http.ResponseWriter, r *http.Request) {

@@ -19,6 +19,7 @@ import (
 	"github.com/StephenSook/erasure-proof/services/api/internal/httpapi"
 	"github.com/StephenSook/erasure-proof/services/api/internal/ingest"
 	"github.com/StephenSook/erasure-proof/services/api/internal/store"
+	"github.com/StephenSook/erasure-proof/services/api/internal/stream"
 )
 
 func main() {
@@ -68,6 +69,17 @@ func main() {
 	}
 
 	srv := httpapi.New(st, orch, ingester, demoSvc, os.Getenv("GIT_SHA"))
+
+	// Live decision-log changefeed -> SSE. Start the consumer on the operator pool and wire its hub
+	// to the SSE endpoint. If rangefeeds are disabled the feed just retries and the stream serves
+	// the snapshot only. Disable entirely with STREAM_CHANGEFEED=0 (e.g. where CDC is unwanted).
+	if os.Getenv("STREAM_CHANGEFEED") != "0" {
+		hub := stream.NewHub(64, 32)
+		srv.SetStreamHub(hub)
+		consumer := stream.NewConsumer(st.Operator, hub)
+		go consumer.Run(context.Background())
+		log.Print("live decision-log changefeed stream enabled")
+	}
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           srv.Routes(),

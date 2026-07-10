@@ -111,5 +111,19 @@ export function createHttpClient(base = ''): DemoApi {
       const toParam = to && to > 0 ? `&to=${to}` : ''
       return request<ConsistencyView>(b, 'GET', `/api/consistency?from=${from}${toParam}`)
     },
+    subscribeErasureStream(handlers) {
+      // Server-Sent Events fed by the CockroachDB changefeed. EventSource auto-reconnects; onError
+      // fires on a dropped connection so the UI can show a reconnecting state.
+      const es = new EventSource(b + '/api/erasure-stream')
+      es.addEventListener('snapshot', (e) => {
+        const d = JSON.parse((e as MessageEvent).data) as { rows?: DecisionRow[]; live?: boolean }
+        handlers.onSnapshot(d.rows ?? [], d.live ?? false)
+      })
+      es.addEventListener('row', (e) => {
+        handlers.onRow(JSON.parse((e as MessageEvent).data) as DecisionRow)
+      })
+      es.onerror = () => handlers.onError?.('stream disconnected (reconnecting)')
+      return () => es.close()
+    },
   }
 }

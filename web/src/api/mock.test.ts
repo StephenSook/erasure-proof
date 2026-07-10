@@ -58,6 +58,30 @@ describe('mock client', () => {
     expect(live.input_sha256).toMatch(/^[0-9a-f]{64}$/)
   })
 
+  it('erasure stream sends a snapshot then pushes the erasure row live', async () => {
+    const api = createMockClient()
+    await api.ingest('c', 'e')
+    let snapshotLive: boolean | null = null
+    const rows: number[] = []
+    const unsub = api.subscribeErasureStream({
+      onSnapshot: (r, live) => {
+        snapshotLive = live
+        r.forEach((row) => rows.push(row.seq))
+      },
+      onRow: (row) => rows.push(row.seq),
+    })
+    // Snapshot fired synchronously with the current log (seq 1) and live=false (no changefeed).
+    expect(snapshotLive).toBe(false)
+    expect(rows).toEqual([1])
+    // Erasing pushes the new row (seq 2) to the subscriber.
+    await api.erase('x')
+    expect(rows).toEqual([1, 2])
+    unsub()
+    // After unsubscribe, no more rows arrive.
+    await createMockClient() // fresh instance to avoid touching this one's erased state
+    expect(rows).toEqual([1, 2])
+  })
+
   it('proof carries Merkle fields that verify inclusion + consistency in the browser', async () => {
     // Mirrors the /proof/:id transparency panel: recompute the leaf from the SIGNED head, prove
     // inclusion in the signed tree, and prove the current log is an append-only extension.
