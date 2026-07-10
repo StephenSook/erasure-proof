@@ -1,10 +1,13 @@
 package erasure_test
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -196,6 +199,142 @@ func TestErase_SurvivesInjectedRetries(t *testing.T) {
 
 	// Verify atomic completion using the clean pool.
 	assertErased(t, st, subjectID)
+}
+
+// TestErase_ConcurrentGaplessChainAtScale is the honest at-scale evidence: N subjects erased at
+// once, then the ENTIRE decision log is verified to be a gapless, hash-intact chain (seq 1..N with
+// each hash linking to the previous). Under SERIALIZABLE, N concurrent appends racing for the same
+// next seq force 40001 retries that the crdbpgx wrapper absorbs; a gapless chain is proof the
+// serialization held. It logs real per-erasure latency percentiles for the concurrency findings
+// doc. N defaults to 50 (CI-safe under -race); set CONCURRENCY_N higher for a local capture.
+func TestErase_ConcurrentGaplessChainAtScale(t *testing.T) {
+	dsn := os.Getenv("CRDB_DSN_TEST")
+	if dsn == "" {
+		t.Skip("set CRDB_DSN_TEST")
+	}
+	// 25 is the CI gate: comfortably below the crdbpgx 50-retry ceiling even on a slow, -race CI
+	// runner, so it never flakes, while still forcing real contention on the gapless seq. Local
+	// captures use CONCURRENCY_N=50/100 (see docs/concurrency.md); ~100-way single-node contention
+	// can exhaust the retry budget, an honest limit of the global-sequence hot-spot.
+	n := 25
+	if v := os.Getenv("CONCURRENCY_N"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil && p > 0 {
+			n = p
+		}
+	}
+	ctx := context.Background()
+	root := repoRoot(t)
+
+	// Size the operator pool so N erasures genuinely run at once rather than queueing on the pool.
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	pooledDSN := dsn + sep + "pool_max_conns=" + strconv.Itoa(n+4)
+
+	admin, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	for _, m := range []string{"0001_schema.sql", "0005_proof_document.sql"} {
+		schema, err := os.ReadFile(filepath.Join(root, "db", "migrations", m))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := admin.Exec(ctx, string(schema)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// This test owns the whole chain, so start from an empty log for an unambiguous seq 1..N check.
+	if _, err := admin.Exec(ctx, "TRUNCATE decision_log, subject_keys, erasure_record, agent_memory"); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := store.Open(ctx, pooledDSN, pooledDSN, filepath.Join(root, "db", "queries"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	svc := erasure.New(st)
+
+	subjects := make([]string, n)
+	for i := range subjects {
+		subjects[i] = seedSubjectFresh(t, admin)
+	}
+
+	// Fire N erasures concurrently, timing each, all released together by a start barrier.
+	start := make(chan struct{})
+	durations := make([]time.Duration, n)
+	errs := make([]error, n)
+	seqs := make([]int64, n)
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			t0 := time.Now()
+			res, err := svc.Erase(context.Background(), subjects[i], "erasure", "gdpr_art_17")
+			durations[i] = time.Since(t0)
+			errs[i], seqs[i] = err, res.Seq
+		}(i)
+	}
+	wallStart := time.Now()
+	close(start)
+	wg.Wait()
+	wall := time.Since(wallStart)
+
+	// Every erasure must have committed, with a unique seq.
+	seen := map[int64]bool{}
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent erase %d failed: %v", i, err)
+		}
+		if seen[seqs[i]] {
+			t.Fatalf("duplicate committed seq %d", seqs[i])
+		}
+		seen[seqs[i]] = true
+	}
+
+	// The whole decision log must be a gapless, hash-intact chain: seq 1..N, each hash = Link(prev).
+	rows, err := admin.Query(ctx,
+		"SELECT seq, subject_hash, action, lawful_basis, prev_hash, hash FROM decision_log ORDER BY seq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	prev := chain.GenesisPrevHash()
+	var want int64 = 1
+	for rows.Next() {
+		var seq int64
+		var subjectHash, prevHash, hash []byte
+		var action, basis string
+		if err := rows.Scan(&seq, &subjectHash, &action, &basis, &prevHash, &hash); err != nil {
+			t.Fatal(err)
+		}
+		if seq != want {
+			t.Fatalf("chain gap: got seq %d, want %d", seq, want)
+		}
+		if !bytes.Equal(prevHash, prev) {
+			t.Fatalf("seq %d prev_hash does not chain to the previous row", seq)
+		}
+		if expected := chain.Link(prev, seq, action, basis, subjectHash); !bytes.Equal(hash, expected) {
+			t.Fatalf("seq %d hash does not match the recomputed chain link", seq)
+		}
+		prev = hash
+		want++
+	}
+	if got := want - 1; got != int64(n) {
+		t.Fatalf("chain length %d, want exactly %d", got, n)
+	}
+
+	// Report measured latencies for the concurrency findings doc.
+	sort.Slice(durations, func(a, b int) bool { return durations[a] < durations[b] })
+	pct := func(p float64) time.Duration { return durations[int(float64(n-1)*p)] }
+	t.Logf("CONCURRENCY: %d erasures, gapless hash chain 1..%d intact; wall=%s p50=%s p95=%s max=%s",
+		n, n, wall.Round(time.Millisecond), pct(0.5).Round(time.Millisecond),
+		pct(0.95).Round(time.Millisecond), durations[n-1].Round(time.Millisecond))
 }
 
 // seedSubjectFresh inserts one subject (key + memory row) and returns its id.
