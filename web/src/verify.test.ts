@@ -275,4 +275,19 @@ describe('verifyConsistency (RFC 6962, browser side)', () => {
     }
     expect(await verifyConsistency(9, 4, proof, rootTo, rootFrom)).toBe(false)
   })
+
+  it('rejects a rewritten earlier history (fork), the adversarial direction', async () => {
+    const n = 11
+    const m = 5
+    const orig: Uint8Array[] = []
+    for (let i = 0; i < n; i++) orig.push(await merkleLeafHash(enc(`h-${i}`)))
+    const committedRoot1 = bytesToHex(await root(orig.slice(0, m)))
+    // Fork: rewrite a leaf inside the first-m prefix, then honestly prove consistency over the fork.
+    const forked = [...orig]
+    forked[2] = await merkleLeafHash(enc('rewritten'))
+    const forkedRoot2 = bytesToHex(await root(forked))
+    const proof = (await consistencyProof(forked, m)).map(bytesToHex)
+    // The honest proof over the forked tree must NOT verify against the genuine committed root1.
+    expect(await verifyConsistency(m, n, proof, committedRoot1, forkedRoot2)).toBe(false)
+  })
 })

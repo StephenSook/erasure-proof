@@ -66,6 +66,28 @@ func TestConsistency_TamperingFails(t *testing.T) {
 	}
 }
 
+// TestConsistency_RejectsRewrittenHistory is the adversarial direction: an honest consistency proof
+// generated over a FORKED tree (same first-m leaves except one was rewritten) must not verify
+// against the genuine committed root of the original first-m tree. Rewriting an earlier entry is
+// exactly what a consistency proof exists to catch.
+func TestConsistency_RejectsRewrittenHistory(t *testing.T) {
+	for _, tc := range []struct{ n, m, rewriteAt int }{{11, 5, 2}, {8, 4, 0}, {13, 6, 5}, {16, 9, 8}} {
+		orig := leaves(tc.n)
+		committedRoot1 := Root(orig[:tc.m]) // the honest earlier root a proof would have signed
+
+		// Fork: rewrite one leaf at an index inside the first-m prefix.
+		forked := make([][]byte, tc.n)
+		copy(forked, orig)
+		forked[tc.rewriteAt] = []byte("rewritten-history")
+		forkedRoot2 := Root(forked)
+		proof := ConsistencyProof(forked, tc.m) // an honest proof, but over the rewritten tree
+
+		if VerifyConsistency(tc.m, tc.n, proof, committedRoot1, forkedRoot2) {
+			t.Errorf("n=%d m=%d rewriteAt=%d: a rewritten history verified against the committed root1", tc.n, tc.m, tc.rewriteAt)
+		}
+	}
+}
+
 func TestConsistency_IdenticalSizeIsEmptyProof(t *testing.T) {
 	all := leaves(7)
 	root := Root(all)

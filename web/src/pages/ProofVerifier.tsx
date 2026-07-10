@@ -72,16 +72,25 @@ async function checkTransparency(body: Record<string, unknown>, api: DemoApi): P
       inc.audit_path,
       merkleRoot,
     )
-    // Consistency: the current log is an append-only extension of the signed tree.
+    // Consistency: the current log is an append-only extension of the signed tree. Verify in EVERY
+    // case against the head the server actually presents, so the "append-only" verdict is never
+    // inferred from a server-reported size alone.
     const head2 = await api.getTreeHead()
     const currentSize = head2.tree_size
+    let consistencyOk: boolean
     const grew = currentSize > signedSize
-    let consistencyOk = true
-    if (grew) {
+    if (currentSize < signedSize) {
+      // The server reports a SMALLER tree than the one it signed: truncation or rewrite, not
+      // append-only. Fail closed.
+      consistencyOk = false
+    } else if (grew) {
       const cons = await api.getConsistency(signedSize, currentSize)
       consistencyOk =
         cons.root_to === head2.root &&
         (await verifyConsistency(signedSize, currentSize, cons.proof, merkleRoot, cons.root_to))
+    } else {
+      // Same size: the presented head must be byte-for-byte the signed root, or it was rewritten.
+      consistencyOk = head2.root === merkleRoot
     }
     return { state: 'done', inclusionOk, consistencyOk, signedSize, currentSize, grew }
   } catch (e) {
@@ -288,11 +297,13 @@ function transparencyPanel(t: Transparency) {
           },
           {
             k: 'log is append-only since',
-            v: t.grew
-              ? t.consistencyOk
+            v: t.consistencyOk
+              ? t.grew
                 ? `yes, extended ${t.signedSize} to ${t.currentSize}, never rewritten`
-                : 'NO, consistency failed'
-              : 'yes, unchanged since signing',
+                : 'yes, head still matches the signed root'
+              : t.currentSize < t.signedSize
+                ? `NO, the served log (size ${t.currentSize}) is smaller than the signed tree`
+                : 'NO, consistency check failed',
             tone: t.consistencyOk ? 'ok' : 'bad',
           },
         ]}

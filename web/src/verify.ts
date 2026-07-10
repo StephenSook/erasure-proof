@@ -203,6 +203,8 @@ export async function verifyInclusion(
 }
 
 // --- RFC 6962 consistency proof (browser verifier, mirrors the Go merkle.VerifyConsistency) ---
+// The bit helpers below use 32-bit operators (>>>, ^), so they are correct for tree sizes < 2^31.
+// A decision log never approaches that, and bitLen uses Math.floor to avoid any 32-bit dependence.
 
 function trailingZeros(x: number): number {
   if (x === 0) return 0
