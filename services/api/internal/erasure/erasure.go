@@ -64,12 +64,16 @@ const (
 	qNullEmbeddings      = "null_embeddings"
 	qInsertErasureRecord = "insert_erasure_record"
 	qErasureRecordExists = "erasure_record_exists"
+	qSetProofRef         = "set_proof_ref"
+	qUnanchoredErasures  = "unanchored_erasures"
 )
 
-// RequiredQueries is the set of named statements Erase looks up; pass it to store.Queries.Require.
+// RequiredQueries is the set of named statements the erasure path and its post-commit anchoring and
+// reconciler look up; pass it to store.Queries.Require at startup.
 var RequiredQueries = []string{
 	qLockSubjectKey, qChainHead, qInsertDecision, qDeleteSubjectKey,
 	qNullEmbeddings, qInsertErasureRecord, qErasureRecordExists,
+	qSetProofRef, qUnanchoredErasures,
 }
 
 // ErrSubjectNotFound is returned when neither a key row nor a prior erasure record exists for the
@@ -77,12 +81,15 @@ var RequiredQueries = []string{
 // mistake "did nothing because the id was wrong" for "already handled".
 var ErrSubjectNotFound = errors.New("unknown subject")
 
-// Result reports what the committed transaction recorded.
+// Result reports what the committed transaction recorded, plus the key metadata the post-commit
+// proof and kill switch need (captured before the key row was deleted).
 type Result struct {
 	Seq         int64  `json:"decision_log_seq"`
 	SubjectHash []byte `json:"subject_hash"`
 	Fingerprint []byte `json:"wrapped_key_fingerprint"`
 	ChainHead   []byte `json:"decision_log_head"`
+	KMSKeyARN   string `json:"kms_key_arn"`
+	KeyOrigin   string `json:"key_origin"` // GENERATE_DATA_KEY | IMPORTED_MATERIAL
 }
 
 // Service runs erasures against the operator pool.
@@ -113,9 +120,11 @@ func (svc *Service) Erase(ctx context.Context, subjectID string, action Action, 
 
 	var res Result
 	err := crdbpgx.ExecuteTx(ctx, svc.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
-		// 1. Lock the subject key row and capture the fingerprint retained in the proof.
+		// 1. Lock the subject key row and capture the fields the post-commit proof needs.
 		var fingerprint []byte
-		err := tx.QueryRow(ctx, svc.q.MustGet(qLockSubjectKey), subjectID).Scan(&fingerprint)
+		var kmsKeyARN, keyOrigin string
+		err := tx.QueryRow(ctx, svc.q.MustGet(qLockSubjectKey), subjectID).
+			Scan(&fingerprint, &kmsKeyARN, &keyOrigin)
 		if errors.Is(err, pgx.ErrNoRows) {
 			// No key row: distinguish an already-erased subject from an unknown id.
 			var erased bool
@@ -161,13 +170,16 @@ func (svc *Service) Erase(ctx context.Context, subjectID string, action Action, 
 			return fmt.Errorf("null embeddings: %w", err)
 		}
 
-		// 6. Record the erasure.
+		// 6. Record the erasure (retaining the KMS ARN so the reconciler can anchor the proof).
 		if _, err := tx.Exec(ctx, svc.q.MustGet(qInsertErasureRecord),
-			subjectID, newSeq, fingerprint); err != nil {
+			subjectID, newSeq, fingerprint, kmsKeyARN); err != nil {
 			return fmt.Errorf("insert erasure record: %w", err)
 		}
 
-		res = Result{Seq: newSeq, SubjectHash: subjectHash, Fingerprint: fingerprint, ChainHead: rowHash}
+		res = Result{
+			Seq: newSeq, SubjectHash: subjectHash, Fingerprint: fingerprint, ChainHead: rowHash,
+			KMSKeyARN: kmsKeyARN, KeyOrigin: keyOrigin,
+		}
 		return nil
 	})
 	return res, err
