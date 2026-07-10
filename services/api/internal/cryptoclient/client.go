@@ -152,14 +152,43 @@ func (c *HTTP) Invert(ctx context.Context) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	return c.doInvert(req)
+}
+
+// InvertLive runs live GPU inversion of the given embedding via cryptod POST /invert/live. cryptod
+// itself falls back to the recorded run if the GPU worker is unconfigured or unreachable, so a
+// non-error response may carry source="recorded_golden_run"; the caller reads the source label.
+func (c *HTTP) InvertLive(ctx context.Context, embeddingB64 string) (map[string]any, error) {
+	body, err := json.Marshal(map[string]any{"embedding": embeddingB64})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/invert/live", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return c.doInvert(req)
+}
+
+// InvertConfig reports whether cryptod has a live GPU worker configured.
+func (c *HTTP) InvertConfig(ctx context.Context) (map[string]any, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/invert/config", nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.doInvert(req)
+}
+
+func (c *HTTP) doInvert(req *http.Request) (map[string]any, error) {
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("cryptod /invert: %w", err)
+		return nil, fmt.Errorf("cryptod %s: %w", req.URL.Path, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("cryptod /invert: status %d: %s", resp.StatusCode, snippet)
+		return nil, fmt.Errorf("cryptod %s: status %d: %s", req.URL.Path, resp.StatusCode, snippet)
 	}
 	var out map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {

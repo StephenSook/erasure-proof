@@ -7,6 +7,7 @@ package demo
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -42,9 +43,12 @@ var ErrNotFound = errors.New("not found")
 // insufficientPrivilege is the SQLSTATE CockroachDB returns when a role lacks a privilege.
 const insufficientPrivilege = "42501"
 
-// Inverter is the narrow slice of the crypto client the demo needs (the recorded golden run).
+// Inverter is the narrow slice of the crypto client the demo needs: the recorded golden run, the
+// live GPU inversion, and the availability probe.
 type Inverter interface {
 	Invert(ctx context.Context) (map[string]any, error)
+	InvertLive(ctx context.Context, embeddingB64 string) (map[string]any, error)
+	InvertConfig(ctx context.Context) (map[string]any, error)
 }
 
 // Service holds the read pools and the inversion proxy.
@@ -53,11 +57,20 @@ type Service struct {
 	agent    *pgxpool.Pool
 	q        store.Queries
 	inverter Inverter
+	// liveInvertSem bounds concurrent live GPU inversions so demand (or abuse) cannot fan out
+	// unbounded GPU spend; excess callers get a busy signal rather than another billed container.
+	liveInvertSem chan struct{}
 }
 
 // New builds the demo Service.
 func New(s *store.Store, inverter Inverter) *Service {
-	return &Service{operator: s.Operator, agent: s.Agent, q: s.Q, inverter: inverter}
+	return &Service{
+		operator:      s.Operator,
+		agent:         s.Agent,
+		q:             s.Q,
+		inverter:      inverter,
+		liveInvertSem: make(chan struct{}, 2),
+	}
 }
 
 // MemoryView is a non-sensitive preview of a subject's stored memory.
@@ -233,6 +246,35 @@ func (s *Service) RbacDemo(ctx context.Context) (RbacResult, error) {
 // Inversion returns the recorded Vec2Text golden run from cryptod.
 func (s *Service) Inversion(ctx context.Context) (map[string]any, error) {
 	return s.inverter.Invert(ctx)
+}
+
+// ErrLiveInversionBusy signals that all live-inversion slots are in use (cost guard).
+var ErrLiveInversionBusy = errors.New("live inversion busy")
+
+// InversionConfig reports whether live GPU inversion is available (drives the UI button).
+func (s *Service) InversionConfig(ctx context.Context) (map[string]any, error) {
+	return s.inverter.InvertConfig(ctx)
+}
+
+// InversionLive runs live GPU inversion of one 3072-byte (768 float32) embedding, behind a small
+// concurrency semaphore so the GPU spend stays bounded. It validates the embedding length so a
+// caller cannot push arbitrary-size payloads at the worker. cryptod falls back to the recorded run
+// internally if the worker is down, so the source label in the result tells the viewer what ran.
+func (s *Service) InversionLive(ctx context.Context, embeddingB64 string) (map[string]any, error) {
+	raw, err := base64.StdEncoding.DecodeString(embeddingB64)
+	if err != nil {
+		return nil, fmt.Errorf("bad embedding base64: %w", err)
+	}
+	if len(raw) != 768*4 {
+		return nil, fmt.Errorf("embedding must be 3072 bytes (768 float32), got %d", len(raw))
+	}
+	select {
+	case s.liveInvertSem <- struct{}{}:
+		defer func() { <-s.liveInvertSem }()
+	default:
+		return nil, ErrLiveInversionBusy
+	}
+	return s.inverter.InvertLive(ctx, embeddingB64)
 }
 
 // TreeHead is the RFC 6962 Merkle head over the decision log.
