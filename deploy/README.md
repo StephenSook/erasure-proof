@@ -1,6 +1,6 @@
 # deploy
 
-- `local/` — the local 3-node CockroachDB cluster plus HAProxy (`docker-compose.yml`,
+- `local/`: the local 3-node CockroachDB cluster plus HAProxy (`docker-compose.yml`,
   `haproxy.cfg`). The failure-domain laboratory: it backs spike 3 and the recorded node-kill demo.
   Bring it up with `make cluster-up`.
 - later: the AWS deployment (ECS/Fargate task definitions, S3 + CloudFront, IAM) lives under this
