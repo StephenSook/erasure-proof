@@ -1,0 +1,98 @@
+# Local 3-node CockroachDB cluster + HAProxy. The failure-domain laboratory.
+#
+# This exists for spike 3 (atomic erasure surviving a node kill), the recorded node-kill demo
+# beat, and CI durability tests. Three nodes so a single node kill preserves Raft quorum
+# (replication factor 3). The managed CockroachDB Cloud cluster cannot have its nodes killed by
+# us, so this beat is local by necessity and is disclosed as such on camera (it is real Raft
+# either way).
+#
+# Pin CRDB_IMAGE to the SAME major version as the cloud cluster. Verify the tag exists
+# (`docker pull <tag>`) before the spike; override with `CRDB_IMAGE=... docker compose ...`.
+#
+# Usage:
+#   docker compose -f docker-compose.crdb.yml up -d
+#   # wait for init to finish, then apply migrations against localhost:26257 (see Makefile)
+
+x-crdb-image: &crdb_image ${CRDB_IMAGE:-cockroachdb/cockroach:v25.2.3}
+
+services:
+  roach1:
+    image: *crdb_image
+    container_name: roach1
+    hostname: roach1
+    command: start --insecure --join=roach1,roach2,roach3 --listen-addr=0.0.0.0:26257 --http-addr=0.0.0.0:8080 --advertise-addr=roach1 --locality=region=us-east-1,zone=a
+    volumes:
+      - roach1-data:/cockroach/cockroach-data
+    ports:
+      - "26257:26257"   # SQL, direct to node 1 (HAProxy is the recommended endpoint on 26260)
+      - "8081:8080"     # DB console for the on-camera replica view
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health?ready=1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  roach2:
+    image: *crdb_image
+    container_name: roach2
+    hostname: roach2
+    command: start --insecure --join=roach1,roach2,roach3 --listen-addr=0.0.0.0:26257 --http-addr=0.0.0.0:8080 --advertise-addr=roach2 --locality=region=us-east-1,zone=b
+    volumes:
+      - roach2-data:/cockroach/cockroach-data
+    ports:
+      - "8082:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health?ready=1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  roach3:
+    image: *crdb_image
+    container_name: roach3
+    hostname: roach3
+    command: start --insecure --join=roach1,roach2,roach3 --listen-addr=0.0.0.0:26257 --http-addr=0.0.0.0:8080 --advertise-addr=roach3 --locality=region=us-east-1,zone=c
+    volumes:
+      - roach3-data:/cockroach/cockroach-data
+    ports:
+      - "8083:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health?ready=1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # One-shot: initialize the cluster once the nodes are up.
+  init:
+    image: *crdb_image
+    container_name: roach-init
+    command: init --insecure --host=roach1
+    depends_on:
+      roach1:
+        condition: service_healthy
+      roach2:
+        condition: service_healthy
+      roach3:
+        condition: service_healthy
+    restart: "no"
+
+  # HAProxy load balancer in front of the three nodes. A stopped node is ejected from rotation
+  # within seconds via the /health?ready=1 check, which is what makes the retry wrapper's
+  # reconnect land on a surviving node during the node-kill demo.
+  haproxy:
+    image: haproxy:2.9
+    container_name: roach-haproxy
+    volumes:
+      - ./infra/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    ports:
+      - "26260:26257"   # balanced SQL endpoint used by the app and the node-kill demo
+      - "8090:8080"     # HAProxy stats
+    depends_on:
+      - roach1
+      - roach2
+      - roach3
+
+volumes:
+  roach1-data:
+  roach2-data:
+  roach3-data:
