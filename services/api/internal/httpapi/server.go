@@ -411,29 +411,31 @@ func (s *Server) handleErasureStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	ctx := r.Context()
-	// Snapshot the current log first so a fresh console shows history, then stream live rows. The
-	// changefeed uses no_initial_scan, so there is no overlap or double-send.
-	snapCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	rows, err := s.demo.DecisionLog(snapCtx)
-	cancel()
-	if err != nil {
-		log.Printf("httpapi: stream snapshot failed: %v", err)
-		rows = nil
-	}
-	writeSSE(w, "snapshot", map[string]any{"rows": rows, "live": s.streamHub != nil})
-	flusher.Flush()
+	rc := http.NewResponseController(w)
 
 	if s.streamHub == nil {
-		// No changefeed wired: the snapshot is all we have. Close cleanly.
+		// No changefeed wired: send the current snapshot and close cleanly.
+		rows := s.snapshotRows(ctx)
+		writeSSE(w, "snapshot", map[string]any{"rows": rows, "live": false})
+		flusher.Flush()
 		return
 	}
+
+	// Subscribe BEFORE snapshotting, so a row appended during the snapshot read is buffered and
+	// still delivered live (the client dedupes by seq). This closes the subscribe-after-snapshot
+	// miss window.
 	ch, unsubscribe, ok := s.streamHub.Subscribe()
 	if !ok {
+		rows := s.snapshotRows(ctx)
+		writeSSE(w, "snapshot", map[string]any{"rows": rows, "live": false})
 		writeSSE(w, "error", map[string]string{"error": "too many live viewers; showing the snapshot only"})
 		flusher.Flush()
 		return
 	}
 	defer unsubscribe()
+
+	writeSSE(w, "snapshot", map[string]any{"rows": s.snapshotRows(ctx), "live": true})
+	flusher.Flush()
 
 	keepalive := time.NewTicker(25 * time.Second)
 	defer keepalive.Stop()
@@ -448,12 +450,29 @@ func (s *Server) handleErasureStream(w http.ResponseWriter, r *http.Request) {
 			writeSSE(w, "row", ev)
 			flusher.Flush()
 		case <-keepalive.C:
+			// A short write deadline turns a half-open connection (no FIN, e.g. a closed laptop
+			// lid) into a prompt write error so the subscriber slot is freed within seconds rather
+			// than after TCP's multi-minute timeout.
+			_ = rc.SetWriteDeadline(time.Now().Add(5 * time.Second))
 			if _, err := w.Write([]byte(":keepalive\n\n")); err != nil {
 				return
 			}
 			flusher.Flush()
+			_ = rc.SetWriteDeadline(time.Time{})
 		}
 	}
+}
+
+// snapshotRows fetches the current decision log for the SSE snapshot, bounded by a short timeout.
+func (s *Server) snapshotRows(ctx context.Context) []demo.DecisionRow {
+	snapCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	rows, err := s.demo.DecisionLog(snapCtx)
+	if err != nil {
+		log.Printf("httpapi: stream snapshot failed: %v", err)
+		return nil
+	}
+	return rows
 }
 
 // writeSSE writes one named Server-Sent Event with a JSON data payload.

@@ -71,16 +71,18 @@ func (h *Hub) Publish(ev DecisionEvent) {
 		for {
 			select {
 			case c <- ev:
+				// Delivered.
 			default:
-				// Full: drop the oldest, then retry the send. Terminates because we hold h.mu (no
-				// other Publish or the unsubscribe-close can run concurrently), so after one drop
-				// the channel has a free slot and the retry send succeeds; the reader only ever
-				// frees more space, never less.
+				// Full: drop the oldest (best-effort; the reader may have just drained one) and
+				// retry the send. This always delivers ev and drops OLDER events, because we hold
+				// h.mu (no concurrent Publish or unsubscribe-close), so the channel only loses
+				// items until a send slot opens. Terminates: each iteration sends (done) or removes
+				// one queued item, and an empty channel always accepts the send.
 				select {
 				case <-c:
-					continue
 				default:
 				}
+				continue
 			}
 			break
 		}

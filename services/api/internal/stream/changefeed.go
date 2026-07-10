@@ -9,58 +9,70 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5"
 )
 
 // changefeedSQL is a CockroachDB CORE (sinkless) changefeed: it streams new decision_log rows over
 // the SQL connection with no external sink, so it works on the free Basic tier (enterprise
-// changefeeds do not). no_initial_scan means only rows appended AFTER the feed starts are streamed;
-// the SSE handler sends the current log snapshot first, so nothing is missed or double-sent.
+// changefeeds do not). no_initial_scan means only rows appended AFTER the feed starts are streamed.
+// The SSE handler subscribes BEFORE reading the snapshot, so any row appended during the snapshot is
+// still delivered live; the client dedupes by seq, so the harmless snapshot/live overlap is merged
+// rather than shown twice.
 const changefeedSQL = "EXPERIMENTAL CHANGEFEED FOR decision_log WITH no_initial_scan"
 
-// Consumer runs the changefeed on a dedicated connection and publishes each row to the Hub,
-// reconnecting with backoff if the feed drops. It requires kv.rangefeed.enabled (set by the
-// deploy/local setup); if rangefeeds are off the feed errors and the consumer keeps retrying, and
-// the SSE stream degrades to the snapshot-only view.
+// Consumer runs the changefeed on its OWN dedicated connection (never the shared operator pool, so
+// the always-on feed cannot subtract a connection from the erasure/read paths) and publishes each
+// row to the Hub, reconnecting with backoff if the feed drops. It requires kv.rangefeed.enabled
+// (set by the deploy/local setup); if rangefeeds are off the feed errors and the consumer keeps
+// retrying, and the SSE stream degrades to the snapshot-only view.
 type Consumer struct {
-	pool *pgxpool.Pool
-	hub  *Hub
+	dsn string
+	hub *Hub
 }
 
-// NewConsumer builds a changefeed consumer over the given pool (use the operator pool; the
-// changefeed is a read).
-func NewConsumer(pool *pgxpool.Pool, hub *Hub) *Consumer {
-	return &Consumer{pool: pool, hub: hub}
+// NewConsumer builds a changefeed consumer that opens its own connection to dsn.
+func NewConsumer(dsn string, hub *Hub) *Consumer {
+	return &Consumer{dsn: dsn, hub: hub}
 }
 
-// Run streams until ctx is cancelled, reconnecting on error with capped backoff. Intended to run in
-// its own goroutine for the process lifetime.
+// Run streams until ctx is cancelled, reconnecting with capped backoff. A minimum dwell is enforced
+// on EVERY iteration (error or clean exit), so a changefeed that ends immediately cannot hot-loop
+// the database. Intended to run in its own goroutine, cancelled on shutdown.
 func (c *Consumer) Run(ctx context.Context) {
 	backoff := time.Second
 	for ctx.Err() == nil {
-		if err := c.stream(ctx); err != nil && ctx.Err() == nil {
-			log.Printf("stream: changefeed ended (%v); retrying in %s", err, backoff)
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(backoff):
-			}
-			if backoff < 30*time.Second {
-				backoff *= 2
-			}
-			continue
+		start := time.Now()
+		err := c.stream(ctx)
+		if ctx.Err() != nil {
+			return
 		}
-		backoff = time.Second
+		if err != nil {
+			log.Printf("stream: changefeed ended with error (%v); retrying in %s", err, backoff)
+		} else {
+			log.Printf("stream: changefeed closed cleanly after %s; retrying in %s", time.Since(start).Round(time.Second), backoff)
+		}
+		// Always wait before reconnecting; grow the delay unless the feed ran a healthy while.
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		if time.Since(start) > time.Minute {
+			backoff = time.Second // the feed was healthy for a while; reset the backoff
+		} else if backoff < 30*time.Second {
+			backoff *= 2
+		}
 	}
 }
 
-// stream opens one changefeed and publishes rows until it ends or ctx is cancelled.
+// stream opens one changefeed on a fresh dedicated connection and publishes rows until it ends or
+// ctx is cancelled.
 func (c *Consumer) stream(ctx context.Context) error {
-	conn, err := c.pool.Acquire(ctx)
+	conn, err := pgx.Connect(ctx, c.dsn)
 	if err != nil {
-		return fmt.Errorf("acquire changefeed conn: %w", err)
+		return fmt.Errorf("connect changefeed conn: %w", err)
 	}
-	defer conn.Release()
+	defer func() { _ = conn.Close(context.Background()) }()
 
 	rows, err := conn.Query(ctx, changefeedSQL)
 	if err != nil {
@@ -121,11 +133,15 @@ func parseChangefeedValue(value []byte) (DecisionEvent, error) {
 }
 
 // normalizeHexBytes converts CockroachDB's \x-prefixed BYTES rendering to plain lowercase hex. A
-// value without the prefix is returned unchanged (defensive).
+// non-hex value (e.g. if a future CockroachDB version emits BYTES as base64) is blanked AND logged,
+// so a changefeed format change surfaces as a warning rather than a silently empty hash chain.
 func normalizeHexBytes(s string) string {
-	s = strings.TrimPrefix(s, `\x`)
-	if _, err := hex.DecodeString(s); err != nil {
-		return "" // not hex we can trust; render empty rather than garbage
+	trimmed := strings.TrimPrefix(s, `\x`)
+	if _, err := hex.DecodeString(trimmed); err != nil {
+		if s != "" {
+			log.Printf("stream: changefeed bytes field is not \\x-hex (got %q); rendering empty", s)
+		}
+		return ""
 	}
-	return strings.ToLower(s)
+	return strings.ToLower(trimmed)
 }
