@@ -135,8 +135,11 @@ head` as associated data; every erasure emits an ECDSA P-256 proof that signs th
 seq, the erasure's own timestamp, and the RFC 6962 Merkle root and tree size, anchored to S3
 Object Lock; the proof verifies in the judge's browser over the exact stored canonical bytes,
 with client-side subject binding against replay; a genuinely read-only MCP server exposes four
-forensic tools; and a hypothesis property-test suite proves decrypt-fails-after-destruction.
-(Details: [ARCHITECTURE.md](ARCHITECTURE.md), [SECURITY.md](SECURITY.md).)
+forensic tools; and a hypothesis property-test suite proves decrypt-fails-after-destruction. Under
+concurrent erasure the gapless hash chain holds with no lost or duplicated appends, measured to
+50-way concurrency with the retry-budget ceiling reported honestly
+([docs/concurrency.md](docs/concurrency.md)). (Details: [ARCHITECTURE.md](ARCHITECTURE.md),
+[SECURITY.md](SECURITY.md).)
 
 ## Real-World Impact
 
