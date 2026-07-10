@@ -70,9 +70,10 @@ resource "aws_ecs_task_definition" "core" {
         { name = "ERASER_ROLE_ARN", value = aws_iam_role.eraser.arn },
         { name = "ANCHOR_ROLE_ARN", value = aws_iam_role.anchor.arn },
         { name = "INFERENCE_ROLE_ARN", value = aws_iam_role.inference.arn },
-      ]
-      secrets = [
-        { name = "ECDSA_SIGNING_KEY_PEM", valueFrom = "${var.ssm_prefix}/ecdsa-signing-key" },
+        # Proofs are signed inside KMS; the private key never exists in this task. This replaces
+        # the former SSM SecureString PEM secret (the /ecdsa-signing-key parameter can be deleted
+        # at deploy; entrypoint-cryptod.sh tolerates its absence).
+        { name = "KMS_SIGNING_KEY_ARN", value = aws_kms_key.proof_signing.arn },
       ]
       logConfiguration = {
         logDriver = "awslogs"

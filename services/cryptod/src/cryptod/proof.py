@@ -72,8 +72,10 @@ def canonical_bytes(proof: dict[str, Any]) -> bytes:
     return json.dumps(proof, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
 
 
-def sign_proof(private_key: ec.EllipticCurvePrivateKey, proof: dict[str, Any]) -> bytes:
-    return signing.sign(private_key, canonical_bytes(proof))
+def sign_proof(signer: signing.ProofSigner, proof: dict[str, Any]) -> bytes:
+    """Sign the canonical proof bytes. The signer may hold the key locally (LocalSigner) or
+    delegate to KMS (KmsSigner); the signature format and verification path are identical."""
+    return signer.sign(canonical_bytes(proof))
 
 
 def verify_proof(

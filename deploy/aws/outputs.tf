@@ -21,6 +21,11 @@ output "web_bucket" {
   value       = aws_s3_bucket.web.bucket
 }
 
+output "proof_signing_key_arn" {
+  description = "KMS asymmetric proof-signing key (ECDSA P-256; private key never leaves KMS)."
+  value       = aws_kms_key.proof_signing.arn
+}
+
 output "task_role_arns" {
   description = "The three-principal split (plus the assume-only base)."
   value = {
