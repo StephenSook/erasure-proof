@@ -2,6 +2,7 @@ package erasure_test
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"testing"
 
@@ -31,7 +32,12 @@ func (s *stubCrypto) Anchor(_ context.Context, req cryptoclient.AnchorRequest) (
 	if s.anchorErr != nil {
 		return cryptoclient.AnchorResponse{}, s.anchorErr
 	}
-	return cryptoclient.AnchorResponse{ProofRef: "s3://proofs/" + req.SubjectHash + ".json"}, nil
+	return cryptoclient.AnchorResponse{
+		ProofRef:           "s3://proofs/" + req.SubjectHash + ".json",
+		ProofCanonical:     base64.StdEncoding.EncodeToString([]byte(`{"canonical":true}`)),
+		Signature:          "c2lnbmF0dXJl",
+		SignerPublicKeyPEM: "-----BEGIN PUBLIC KEY-----\nstub\n-----END PUBLIC KEY-----",
+	}, nil
 }
 
 func TestEraseAndAnchor_RecordsProofRefOnSuccess(t *testing.T) {
@@ -52,6 +58,24 @@ func TestEraseAndAnchor_RecordsProofRefOnSuccess(t *testing.T) {
 	}
 	if stored == nil || *stored != proofRef {
 		t.Errorf("stored proof_ref = %v, want %q", stored, proofRef)
+	}
+
+	// The signed proof document is stored with the record: the exact canonical bytes, the signature,
+	// and the signer key, so the browser verifier can be served without an S3 round trip.
+	var body, sig, pem *string
+	if err := st.Operator.QueryRow(context.Background(),
+		"SELECT proof_body, proof_signature, signer_pubkey_pem FROM erasure_record WHERE subject_id = $1",
+		subjectID).Scan(&body, &sig, &pem); err != nil {
+		t.Fatal(err)
+	}
+	if body == nil || *body != `{"canonical":true}` {
+		t.Errorf("proof_body = %v, want the exact canonical bytes", body)
+	}
+	if sig == nil || *sig != "c2lnbmF0dXJl" {
+		t.Errorf("proof_signature = %v, want the stub signature", sig)
+	}
+	if pem == nil || *pem == "" {
+		t.Error("signer_pubkey_pem not stored")
 	}
 }
 

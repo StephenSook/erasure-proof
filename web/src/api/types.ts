@@ -39,6 +39,11 @@ export interface ProofView {
   fingerprint: string | null
   kms_key_arn: string | null
   proof_ref: string | null
+  // The signed proof document: proof_body is the EXACT canonical bytes the ECDSA signature covers
+  // (verified verbatim in the browser); the signer key is served alongside for cross-checking.
+  proof_body: string | null
+  proof_signature: string | null
+  signer_pubkey_pem: string | null
 }
 
 export interface DecisionRow {

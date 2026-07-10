@@ -1,4 +1,5 @@
 import { useEffect, useRef, type CSSProperties } from 'react'
+import { Link } from 'react-router-dom'
 import { Badge } from '../components/Badge'
 import { CodeBlock } from '../components/CodeBlock'
 import { KeyValue } from '../components/KeyValue'
@@ -207,7 +208,8 @@ export function DemoConsole() {
               <div className="note">
                 Proof record read back:{' '}
                 <span className="mono">{state.proof.proof_ref ?? '(anchoring pending)'}</span>
-                {state.proof.committed_at ? `, committed ${state.proof.committed_at}` : ''}
+                {state.proof.committed_at ? `, committed ${state.proof.committed_at}` : ''}{' '}
+                <Link to={`/proof/${state.proof.subject_id}`}>Verify this proof in your browser -&gt;</Link>
               </div>
             )}
           </>

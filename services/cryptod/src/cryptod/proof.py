@@ -56,8 +56,12 @@ def build_proof(
 
 
 def canonical_bytes(proof: dict[str, Any]) -> bytes:
-    """Deterministic serialization of the proof for signing and verification."""
-    return json.dumps(proof, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    """Deterministic serialization of the proof for signing and verification.
+
+    ensure_ascii=True keeps the canonical form pure ASCII, so the browser verifier's
+    string -> TextEncoder round trip can never disagree with these bytes over non-ASCII content.
+    """
+    return json.dumps(proof, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
 
 
 def sign_proof(private_key: ec.EllipticCurvePrivateKey, proof: dict[str, Any]) -> bytes:

@@ -36,9 +36,42 @@ function goldenRun(): InversionGoldenRun {
   }
 }
 
+// Mock proofs are REALLY signed at runtime with a throwaway WebCrypto P-256 key, so the /proof
+// verifier page is fully demonstrable against the mock (labeled mock; the key lives only in this
+// tab). WebCrypto emits raw r||s signatures; the verifier accepts both raw and DER.
+async function signMockProof(body: string): Promise<{ signature: string; pem: string }> {
+  const kp = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, [
+    'sign',
+    'verify',
+  ])
+  const sig = new Uint8Array(
+    await crypto.subtle.sign(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      kp.privateKey,
+      new TextEncoder().encode(body),
+    ),
+  )
+  const spki = new Uint8Array(await crypto.subtle.exportKey('spki', kp.publicKey))
+  let bin = ''
+  for (const b of sig) {
+    bin += String.fromCharCode(b)
+  }
+  const sigB64 = btoa(bin)
+  let spkiBin = ''
+  for (const b of spki) {
+    spkiBin += String.fromCharCode(b)
+  }
+  const lines = btoa(spkiBin).match(/.{1,64}/g) ?? []
+  const pem = `-----BEGIN PUBLIC KEY-----\n${lines.join('\n')}\n-----END PUBLIC KEY-----\n`
+  return { signature: sigB64, pem }
+}
+
 export function createMockClient(): DemoApi {
   let subjectId = ''
   let erased = false
+  let proofBody = ''
+  let proofSignature = ''
+  let signerPem = ''
 
   const requireSubject = () => {
     if (!subjectId) {
@@ -76,6 +109,23 @@ export function createMockClient(): DemoApi {
         throw new ApiError(409, 'already erased')
       }
       erased = true
+      // subject_hash must be the REAL SHA-256 of the subject id: the verifier page checks the
+      // signed binding client-side, in mock mode too.
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(subjectId))
+      const subjectHash = Array.from(new Uint8Array(digest), (b) =>
+        b.toString(16).padStart(2, '0'),
+      ).join('')
+      proofBody = JSON.stringify({
+        source: 'MOCK (runtime-signed with a throwaway key in this tab)',
+        subject_hash: subjectHash,
+        decision_log_seq: 2,
+        chain_head: '22'.repeat(32),
+        key_state: 'wrapped_key_destroyed',
+        occurred_at: FIXED_TIME,
+      })
+      const signed = await signMockProof(proofBody)
+      proofSignature = signed.signature
+      signerPem = signed.pem
       // These byte fields are not decoded or displayed by the console; low-entropy placeholders keep
       // the mock free of anything a secret scanner would flag as a high-entropy key.
       const resp: EraseResponse = {
@@ -103,6 +153,9 @@ export function createMockClient(): DemoApi {
         fingerprint: FINGERPRINT,
         kms_key_arn: 'arn:aws:kms:us-east-1:000000000000:key/demo',
         proof_ref: 's3://erasure-proof-anchors/subject/2.json',
+        proof_body: proofBody,
+        proof_signature: proofSignature,
+        signer_pubkey_pem: signerPem,
       }
       return proof
     },

@@ -189,6 +189,10 @@ def create_app(cfg: settings.Settings | None = None) -> FastAPI:
         return {
             "proof": doc,
             "signature": _b64e(signature),
+            # The EXACT canonical bytes the signature covers, so callers can store and later
+            # verify them verbatim (browser WebCrypto) with no cross-language re-canonicalization.
+            "proof_canonical": _b64e(body),
+            "signer_public_key_pem": signer_pub_pem,
             "proof_ref": f"s3://{result.bucket}/{result.key}",
             "object_lock_mode": result.mode,
             "retain_until": result.retain_until,

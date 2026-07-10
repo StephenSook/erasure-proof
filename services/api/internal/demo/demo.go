@@ -87,22 +87,27 @@ func (s *Service) Memory(ctx context.Context, subjectID string) (MemoryView, err
 	return v, nil
 }
 
-// ProofView is a subject's recorded erasure-proof state.
+// ProofView is a subject's recorded erasure-proof state, including the signed proof document the
+// browser-side WebCrypto verifier consumes (ProofBody is the exact signed bytes).
 type ProofView struct {
-	SubjectID      string     `json:"subject_id"`
-	RequestedAt    time.Time  `json:"requested_at"`
-	CommittedAt    *time.Time `json:"committed_at"`
-	DecisionLogSeq *int64     `json:"decision_log_seq"`
-	Fingerprint    *string    `json:"fingerprint"`
-	KMSKeyARN      *string    `json:"kms_key_arn"`
-	ProofRef       *string    `json:"proof_ref"`
+	SubjectID       string     `json:"subject_id"`
+	RequestedAt     time.Time  `json:"requested_at"`
+	CommittedAt     *time.Time `json:"committed_at"`
+	DecisionLogSeq  *int64     `json:"decision_log_seq"`
+	Fingerprint     *string    `json:"fingerprint"`
+	KMSKeyARN       *string    `json:"kms_key_arn"`
+	ProofRef        *string    `json:"proof_ref"`
+	ProofBody       *string    `json:"proof_body"`
+	ProofSignature  *string    `json:"proof_signature"`
+	SignerPubkeyPEM *string    `json:"signer_pubkey_pem"`
 }
 
 // Proof returns a subject's erasure-proof record.
 func (s *Service) Proof(ctx context.Context, subjectID string) (ProofView, error) {
 	v := ProofView{SubjectID: subjectID}
 	err := s.operator.QueryRow(ctx, s.q.MustGet(qErasureRecordGet), subjectID).Scan(
-		&v.RequestedAt, &v.CommittedAt, &v.DecisionLogSeq, &v.Fingerprint, &v.KMSKeyARN, &v.ProofRef)
+		&v.RequestedAt, &v.CommittedAt, &v.DecisionLogSeq, &v.Fingerprint, &v.KMSKeyARN, &v.ProofRef,
+		&v.ProofBody, &v.ProofSignature, &v.SignerPubkeyPEM)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ProofView{}, ErrNotFound
 	}
