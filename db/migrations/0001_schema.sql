@@ -11,8 +11,9 @@
 --    (CockroachDB Basic fixes gc.ttlseconds at 4500s / 1h15m; stated on the demo page).
 --  * A single explicit column family avoids the C-SPANN preview bug where vector queries can
 --    return incorrect results on multi-column-family tables (cockroachdb issue #146046).
---  * LOCALITY REGIONAL BY ROW is applied later in 0006 (multi-region only); the base table is
---    single-region so it runs on a local cluster and on the free Basic tier.
+--  * LOCALITY REGIONAL BY ROW lives in db/migrations/optional/0006_regional_by_row.sql
+--    (multi-region clusters only, outside the default glob); the base table is single-region
+--    so it runs on a local cluster and on the free Basic tier.
 
 CREATE TABLE IF NOT EXISTS agent_memory (
     id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
