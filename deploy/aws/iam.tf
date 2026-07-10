@@ -188,6 +188,14 @@ resource "aws_iam_role_policy" "anchor" {
         Action   = ["s3:BypassGovernanceRetention", "s3:DeleteObject", "s3:DeleteObjectVersion"]
         Resource = "arn:aws:s3:::${var.s3_proof_bucket}/*"
       },
+      {
+        # Proof signing lives with the anchor capability (proof emission), NOT the eraser: the
+        # principal that can destroy keys can never sign proofs, and the signer can never destroy.
+        Sid      = "SignProofsOnly"
+        Effect   = "Allow"
+        Action   = ["kms:Sign", "kms:GetPublicKey"]
+        Resource = aws_kms_key.proof_signing.arn
+      },
     ]
   })
 }

@@ -115,6 +115,74 @@ def test_compliance_mode_requires_configured_signing_key():
         create_app(cfg)
 
 
+@mock_aws
+def test_anchor_signs_via_kms_when_configured():
+    """With KMS_SIGNING_KEY_ARN set, the anchored proof is signed inside KMS (the private key never
+    exists in the process) and still verifies through the unchanged standard path."""
+    import base64 as b64mod
+
+    from cryptod import signing as signing_mod
+
+    kms = boto3.client("kms", region_name="us-east-1")
+    wrapping_arn = kms.create_key()["KeyMetadata"]["Arn"]
+    signing_arn = kms.create_key(KeySpec="ECC_NIST_P256", KeyUsage="SIGN_VERIFY")[
+        "KeyMetadata"
+    ]["Arn"]
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket="proofs", ObjectLockEnabledForBucket=True)
+    cfg = settings.Settings(
+        aws_region="us-east-1",
+        kms_wrapping_key_arn=wrapping_arn,
+        s3_proof_bucket="proofs",
+        s3_object_lock_mode="GOVERNANCE",
+        s3_retain_days=1,
+        ecdsa_signing_key_path="",
+        kms_signing_key_arn=signing_arn,
+    )
+    client = TestClient(create_app(cfg))
+
+    anchored = client.post(
+        "/anchor",
+        json={
+            "subject_hash": "ab" * 32,
+            "occurred_at": "2026-07-10T00:00:00Z",
+            "decision_log_seq": 1,
+            "chain_head": "cd" * 32,
+            "wrapped_key_fingerprint": "ef" * 32,
+            "kms_key_arn": wrapping_arn,
+            "key_state": "Enabled",
+        },
+    ).json()
+
+    canonical = b64mod.b64decode(anchored["proof_canonical"])
+    pub_key = signing_mod.load_public_key_pem(anchored["signer_public_key_pem"])
+    signing_mod.verify(pub_key, b64mod.b64decode(anchored["signature"]), canonical)
+    # The embedded public key is the KMS key's, not a process-local one.
+    assert (
+        signing_mod.KmsSigner(signing_arn, "us-east-1").public_key_pem
+        == anchored["signer_public_key_pem"]
+    )
+
+
+@mock_aws
+def test_compliance_mode_accepts_kms_signer():
+    # A KMS signing key is durable across restarts, so it satisfies the COMPLIANCE fail-closed
+    # check that rejects ephemeral signers.
+    signing_arn = boto3.client("kms", region_name="us-east-1").create_key(
+        KeySpec="ECC_NIST_P256", KeyUsage="SIGN_VERIFY"
+    )["KeyMetadata"]["Arn"]
+    cfg = settings.Settings(
+        aws_region="us-east-1",
+        kms_wrapping_key_arn="",
+        s3_proof_bucket="proofs",
+        s3_object_lock_mode="COMPLIANCE",
+        s3_retain_days=1,
+        ecdsa_signing_key_path="",
+        kms_signing_key_arn=signing_arn,
+    )
+    create_app(cfg)  # does not raise
+
+
 def test_verify_rejects_malformed_input():
     cfg = settings.Settings(
         aws_region="us-east-1",

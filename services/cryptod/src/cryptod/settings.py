@@ -13,7 +13,10 @@ class Settings:
     s3_proof_bucket: str
     s3_object_lock_mode: str  # GOVERNANCE (dev) or COMPLIANCE (prod)
     s3_retain_days: int
-    ecdsa_signing_key_path: str  # dev only; production uses SSM SecureString or KMS asymmetric sign
+    ecdsa_signing_key_path: str  # dev fallback; production signs via kms_signing_key_arn
+    # A KMS asymmetric key (ECC_NIST_P256, SIGN_VERIFY). When set it takes precedence over the
+    # file key: the private key then never exists in this process, only in KMS.
+    kms_signing_key_arn: str = ""
     # Live Vec2Text inversion (Modal T4). When both are set, /invert/live calls the GPU worker;
     # otherwise the endpoint falls back to the recorded golden run with an honest source label.
     # Defaulted so the live path is purely additive to existing configs.
@@ -33,6 +36,7 @@ def load() -> Settings:
         s3_object_lock_mode=os.getenv("S3_PROOF_OBJECT_LOCK_MODE", "GOVERNANCE"),
         s3_retain_days=int(os.getenv("S3_PROOF_RETAIN_DAYS", "1")),
         ecdsa_signing_key_path=os.getenv("ECDSA_SIGNING_KEY_PATH", ""),
+        kms_signing_key_arn=os.getenv("KMS_SIGNING_KEY_ARN", ""),
         modal_invert_url=os.getenv("MODAL_INVERT_URL", ""),
         modal_invert_secret=os.getenv("MODAL_INVERT_SECRET", ""),
         modal_embed_url=os.getenv("MODAL_EMBED_URL", ""),

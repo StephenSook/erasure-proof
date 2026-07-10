@@ -84,33 +84,40 @@ class EmbedRequest(BaseModel):
     text: str  # the fact to embed (canonical GTR pipeline, on the Modal GPU)
 
 
-def _load_signer(cfg: settings.Settings) -> ec.EllipticCurvePrivateKey:
+def _load_signer(cfg: settings.Settings) -> signing.ProofSigner:
+    # Preferred: a KMS asymmetric key. The private key never exists in this process; the task
+    # holds only kms:Sign + kms:GetPublicKey on the one signing key, and every Sign call lands in
+    # CloudTrail. Fails at boot (GetPublicKey) on a wrong key or missing permission.
+    if cfg.kms_signing_key_arn:
+        return signing.KmsSigner(cfg.kms_signing_key_arn, cfg.aws_region)
     if cfg.ecdsa_signing_key_path:
         with open(cfg.ecdsa_signing_key_path, "rb") as f:
             key = load_pem_private_key(f.read(), password=None)
         if not isinstance(key, ec.EllipticCurvePrivateKey):
             raise TypeError("configured signing key is not an EC private key")
-        return key
+        return signing.LocalSigner(key)
     # No configured key. An ephemeral key vanishes on restart, so proofs it signs can never be
     # attributed later. Fail closed when anchoring to immutable COMPLIANCE storage; otherwise warn
     # loudly so an ephemeral signer is never mistaken for a configured one.
     if cfg.s3_object_lock_mode == "COMPLIANCE":
         raise RuntimeError(
-            "ECDSA_SIGNING_KEY_PATH is required with COMPLIANCE Object Lock: an ephemeral signer "
-            "would write permanently-locked proofs signed by a key that is lost on restart"
+            "KMS_SIGNING_KEY_ARN or ECDSA_SIGNING_KEY_PATH is required with COMPLIANCE Object "
+            "Lock: an ephemeral signer would write permanently-locked proofs signed by a key "
+            "that is lost on restart"
         )
     log.warning(
-        "cryptod: no ECDSA_SIGNING_KEY_PATH set; using an EPHEMERAL signer. Proofs will NOT verify "
-        "across restarts. Set ECDSA_SIGNING_KEY_PATH for anything but local development."
+        "cryptod: no KMS_SIGNING_KEY_ARN or ECDSA_SIGNING_KEY_PATH set; using an EPHEMERAL "
+        "signer. Proofs will NOT verify across restarts. Configure a signer for anything but "
+        "local development."
     )
-    return signing.generate_private_key()
+    return signing.LocalSigner(signing.generate_private_key())
 
 
 def create_app(cfg: settings.Settings | None = None) -> FastAPI:
     cfg = cfg or settings.load()
     app = FastAPI(title="cryptod", version="0.1.0")
     signer = _load_signer(cfg)
-    signer_pub_pem = signing.public_key_pem(signer.public_key())
+    signer_pub_pem = signer.public_key_pem
 
     @app.get("/healthz")
     def healthz() -> dict:

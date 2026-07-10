@@ -24,7 +24,7 @@ def test_sign_and_verify_roundtrip() -> None:
     priv = signing.generate_private_key()
     pub = priv.public_key()
     doc = _sample_proof(signing.public_key_pem(pub))
-    sig = proof.sign_proof(priv, doc)
+    sig = proof.sign_proof(signing.LocalSigner(priv), doc)
     proof.verify_proof(pub, doc, sig)  # does not raise
 
 
@@ -32,7 +32,7 @@ def test_tampered_proof_fails() -> None:
     priv = signing.generate_private_key()
     pub = priv.public_key()
     doc = _sample_proof(signing.public_key_pem(pub))
-    sig = proof.sign_proof(priv, doc)
+    sig = proof.sign_proof(signing.LocalSigner(priv), doc)
 
     doc["decision_log_seq"] = 8  # tamper after signing
     with pytest.raises(signing.InvalidSignature):
@@ -42,7 +42,7 @@ def test_tampered_proof_fails() -> None:
 def test_wrong_key_fails() -> None:
     priv = signing.generate_private_key()
     doc = _sample_proof(signing.public_key_pem(priv.public_key()))
-    sig = proof.sign_proof(priv, doc)
+    sig = proof.sign_proof(signing.LocalSigner(priv), doc)
 
     attacker = signing.generate_private_key()
     with pytest.raises(signing.InvalidSignature):

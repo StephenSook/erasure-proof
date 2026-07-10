@@ -104,7 +104,9 @@ Earned feedback on all four tools: [docs/feedback-cockroachdb-tools.md](docs/fee
 - **AWS KMS**: the erasure mechanism itself. Per-subject envelope keys via GenerateDataKey with
   `subject_id` bound as encryption context; deleting the wrapped-key row is the crypto-shred,
   and imported-material subjects carry a second kill switch (DeleteImportedKeyMaterial, proven
-  against real KMS).
+  against real KMS). The proof signer is also KMS: an asymmetric ECC_NIST_P256 key signs every
+  proof inside KMS, so the ECDSA private key never exists in any service process, and signing
+  permission lives with the anchor principal, separate from the principal that destroys keys.
 - **Amazon S3 Object Lock**: every erasure proof is ECDSA-signed and anchored to a WORM bucket
   (GOVERNANCE in development, COMPLIANCE for the judged proofs).
 - **Amazon Bedrock (Claude)**: the memory-writer agent distils durable facts via real inference;
