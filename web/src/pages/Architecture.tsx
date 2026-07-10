@@ -63,8 +63,24 @@ export function Architecture() {
           purge (setting the vector NULL) is a plain UPDATE the index survives. Euclidean at preview.
         </li>
         <li>
-          ccloud CLI: provisions and operates the CockroachDB Cloud cluster that serves as the
-          system of record (cluster create, connection info, CA cert flows).
+          Managed MCP Server: the independent verification path. A least-privilege service
+          account reads the decision-log chain head through cockroachlabs.cloud/mcp
+          (select_query), so a verifier does not have to trust our API layer, and every call is
+          audit-logged by CockroachDB Cloud. The Cloud RBAC check runs per tool call: the
+          under-privileged role is refused, the cluster-scoped operator role is permitted
+          (infra/ccloud/mcp-verify.sh).
+        </li>
+        <li>
+          ccloud CLI with service-account RBAC: provisions and operates the cloud cluster, and
+          demonstrates the three distinct denial boundaries with one script
+          (infra/ccloud/rbac-demo.sh): a control-plane HTTP 403 (same key: 200 on its scoped
+          cluster, 403 on billing), the MCP-layer Cloud RBAC refusal, and the data-plane
+          SQLSTATE 42501 when the agent role attempts to tamper with the append-only log.
+        </li>
+        <li>
+          Agent Skills: a verifying-cryptographic-erasure skill authored in this repo following
+          the upstream cockroachlabs/cockroachdb-skills conventions and validated with their own
+          validate-spec.py (zero errors); the upstream contribution PR is in flight.
         </li>
         <li>
           The database itself: SERIALIZABLE transactions with the official crdbpgx retry wrapper,
@@ -72,10 +88,6 @@ export function Architecture() {
           and an append-only hash-chained decision log.
         </li>
       </ul>
-      <p className="muted">
-        The Managed MCP Server and the Agent Skills repo are being evaluated; they are not claimed
-        here until they are load-bearing in shipped code.
-      </p>
 
       <h2>AWS services in use (all load-bearing)</h2>
       <ul className="muted">
