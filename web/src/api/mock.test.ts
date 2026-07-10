@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { bytesToHex, hexToBytes, merkleLeafHash, verifyConsistency, verifyInclusion } from '../verify'
 import { ApiError } from './types'
 import { createMockClient } from './mock'
 
@@ -55,6 +56,32 @@ describe('mock client', () => {
     expect(live.source).toBe('recorded_golden_run')
     expect(live.fell_back).toBe(true)
     expect(live.input_sha256).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it('proof carries Merkle fields that verify inclusion + consistency in the browser', async () => {
+    // Mirrors the /proof/:id transparency panel: recompute the leaf from the SIGNED head, prove
+    // inclusion in the signed tree, and prove the current log is an append-only extension.
+    const api = createMockClient()
+    await api.ingest('c', 'e')
+    await api.erase('x')
+    const proof = await api.getProof('any')
+    const body = JSON.parse(proof.proof_body ?? '{}') as Record<string, unknown>
+    const head = String(body.decision_log_head)
+    const signedRoot = String(body.merkle_root)
+    const signedSize = Number(body.tree_size)
+    const seq = Number(body.decision_log_seq)
+
+    const inc = await api.getInclusion(seq, signedSize)
+    const leafHashHex = bytesToHex(await merkleLeafHash(hexToBytes(head)))
+    expect(await verifyInclusion(leafHashHex, inc.leaf_index, signedSize, inc.audit_path, signedRoot)).toBe(
+      true,
+    )
+
+    const th = await api.getTreeHead()
+    const cons = await api.getConsistency(signedSize, th.tree_size)
+    expect(await verifyConsistency(signedSize, th.tree_size, cons.proof, signedRoot, cons.root_to)).toBe(
+      true,
+    )
   })
 
   it('memory-writer distils a fact, stores a subject, labeled recorded', async () => {

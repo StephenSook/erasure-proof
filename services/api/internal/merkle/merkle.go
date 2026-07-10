@@ -78,8 +78,9 @@ func InclusionProof(leaves [][]byte, m int) [][]byte {
 // not from the endpoint that supplied the audit path. The 0x00/0x01 domain separation only protects
 // against interior-node-as-leaf splices when the verifier applies the leaf prefix itself. The root
 // signed into an erasure proof is a snapshot at anchor time: after later log appends the live tree
-// diverges, and no RFC 6962 consistency proof is implemented, so verify inclusion against the
-// signed (root, tree_size) pair, not the current head.
+// diverges, so verify inclusion against the signed (root, tree_size) pair, not the current head.
+// An RFC 6962 consistency proof (VerifyConsistency in this package) then shows the current tree is
+// an append-only extension of that signed snapshot.
 func VerifyInclusion(leafHash []byte, m, treeSize int, proof [][]byte, root []byte) bool {
 	if m < 0 || m >= treeSize {
 		return false

@@ -52,6 +52,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/rbac-demo", s.handleDemoRbac)
 	mux.HandleFunc("GET /api/tree-head", s.handleDemoTreeHead)
 	mux.HandleFunc("GET /api/inclusion", s.handleDemoInclusion)
+	mux.HandleFunc("GET /api/consistency", s.handleDemoConsistency)
 	mux.HandleFunc("GET /api/agent/config", s.handleAgentConfig)
 	mux.HandleFunc("POST /api/agent/forensics", s.handleAgentForensics)
 	mux.HandleFunc("POST /api/agent/memory-writer", s.handleAgentMemoryWriter)
@@ -277,17 +278,53 @@ func (s *Server) handleDemoInclusion(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "seq must be a positive integer"})
 		return
 	}
+	// Optional size: prove inclusion within the FIRST size leaves (the tree a signed proof
+	// committed to), not the current head. 0/absent means the current tree.
+	size := 0
+	if v := r.URL.Query().Get("size"); v != "" {
+		if size, err = strconv.Atoi(v); err != nil || size < 1 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "size must be a positive integer"})
+			return
+		}
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	inc, err := s.demo.Inclusion(ctx, seq)
+	inc, err := s.demo.Inclusion(ctx, seq, size)
 	switch {
 	case errors.Is(err, demo.ErrNotFound):
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no decision-log entry with that seq"})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no decision-log entry with that seq in that tree"})
 	case err != nil:
 		log.Printf("httpapi: demo inclusion failed: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "inclusion failed"})
 	default:
 		writeJSON(w, http.StatusOK, inc)
+	}
+}
+
+func (s *Server) handleDemoConsistency(w http.ResponseWriter, r *http.Request) {
+	from, err := strconv.Atoi(r.URL.Query().Get("from"))
+	if err != nil || from < 1 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "from must be a positive integer"})
+		return
+	}
+	to := 0 // 0 means the current tree size
+	if v := r.URL.Query().Get("to"); v != "" {
+		if to, err = strconv.Atoi(v); err != nil || to < 1 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "to must be a positive integer"})
+			return
+		}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	cons, err := s.demo.Consistency(ctx, from, to)
+	switch {
+	case errors.Is(err, demo.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "invalid tree sizes for a consistency proof"})
+	case err != nil:
+		log.Printf("httpapi: demo consistency failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "consistency failed"})
+	default:
+		writeJSON(w, http.StatusOK, cons)
 	}
 }
 

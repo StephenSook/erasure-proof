@@ -5,10 +5,12 @@ import {
   type AgentConfig,
   ApiError,
   type ChainResult,
+  type ConsistencyView,
   type DecisionRow,
   type DemoApi,
   type EraseResponse,
   type ForensicsAudit,
+  type InclusionView,
   type IngestResult,
   type InversionConfig,
   type InversionGoldenRun,
@@ -17,6 +19,7 @@ import {
   type MemoryWriterResult,
   type ProofView,
   type RbacResult,
+  type TreeHead,
 } from './types'
 
 interface DecisionLogResponse {
@@ -96,6 +99,17 @@ export function createHttpClient(base = ''): DemoApi {
     },
     rbacDemo() {
       return request<RbacResult>(b, 'POST', '/api/rbac-demo')
+    },
+    getTreeHead() {
+      return request<TreeHead>(b, 'GET', '/api/tree-head')
+    },
+    getInclusion(seq, treeSize) {
+      const size = treeSize && treeSize > 0 ? `&size=${treeSize}` : ''
+      return request<InclusionView>(b, 'GET', `/api/inclusion?seq=${seq}${size}`)
+    },
+    getConsistency(from, to) {
+      const toParam = to && to > 0 ? `&to=${to}` : ''
+      return request<ConsistencyView>(b, 'GET', `/api/consistency?from=${from}${toParam}`)
     },
   }
 }
