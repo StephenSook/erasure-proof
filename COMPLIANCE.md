@@ -31,6 +31,37 @@ The pseudonymized log contains the fact and lawful basis of the decision, not th
 itself, so retaining it does not conflict with the erasure. This is the destroy-the-personal-data,
 keep-the-decision-record pattern, done atomically so the two never diverge.
 
+## Erasure is a qualified right
+
+A practitioner nuance raised by our validator: the right to erasure is not absolute. Article 17
+grounds bite mainly where processing rests on consent or legitimate interests; data processed
+under other bases (legal obligation, for example) carries different duties. That is exactly why
+the decision log records a `lawful_basis` on every action: an erasure decision is only defensible
+if the basis it was evaluated against travels with the record. The demo's controlled vocabulary
+(`gdpr_art_17`, `ai_act_art_19`) is a minimal instance of that idea, not a full basis taxonomy.
+
+## Relationship to the Privacy Claims Token (PCT)
+
+The [PCT specification](https://pctspec.opsf.org) (v0.1 draft, Open Proof Standards Foundation,
+CC BY 4.0) is an open, JWT-model token that travels WITH data and encodes the obligations that
+govern it: jurisdiction of origin, permitted purposes, the lawful basis at collection, consent
+status, transfer restrictions. Every verification event emits a tamper-evident audit record.
+
+How this project relates, stated precisely:
+
+- Same philosophy, complementary artifacts. PCT operationalizes obligations at runtime, BEFORE an
+  action; this project produces signed evidence that the erasure obligation was FULFILLED, after.
+  A PCT-governed pipeline needs exactly the completion evidence this system emits.
+- The decision log's `lawful_basis`-at-write-time binding is the in-database analogue of PCT's
+  lawful-basis-at-collection claim, enforced inside one system rather than carried between systems.
+- NOT a conformance claim. Our proof is ECDSA P-256 over canonical JSON, not a JWT (PCT specifies
+  RS256/HS256 per RFC 7519), and PCT v1.0 is still being finalized from its first public comment
+  window. Expressing the erasure proof as a PCT extension claim is future work, not a shipped
+  feature.
+
+Validator context: the erasure-gap quote in the README is from Peter Borner in his role as interim
+chair of OPSF, attributed with his permission.
+
 ## Honest limitations
 
 - Whether an embedding legally constitutes personal data has no binding ruling we rely on; the

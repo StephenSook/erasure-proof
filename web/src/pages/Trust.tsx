@@ -58,6 +58,18 @@ export function Trust() {
         </tbody>
       </table>
 
+      <h2>Validated by the field</h2>
+      <p className="muted">
+        While validating this project we asked whether the problem is real. Peter Borner, interim
+        chair of the Open Proof Standards Foundation (the body publishing the Privacy Claims Token
+        specification), answered: &quot;I don&apos;t know of anyone that can currently identify the
+        obligations placed on data at the time of collection. I also don&apos;t know of anyone that
+        can then prove they erased the data fully and correctly.&quot; Quoted with permission. Our
+        lawful-basis-bound decision log answers the first half inside one database; the signed
+        erasure proof answers the second. We align with PCT&apos;s audit-first philosophy but do not
+        claim PCT conformance (different signature model; the spec is a v0.1 draft).
+      </p>
+
       <h2>Conditions we state out loud</h2>
       <ul className="muted">
         <li>Serializable, not strictly serializable (Jepsen confirmed CockroachDB lacks the latter).</li>

@@ -116,6 +116,19 @@ auto-generated logs; MiFID II sets a longer floor for financial entities. These 
 in opposite directions and no single system reconciles them today. (Details:
 [COMPLIANCE.md](COMPLIANCE.md).)
 
+The gap is not hypothetical. Peter Borner, interim chair of the Open Proof Standards Foundation
+(the body publishing the Privacy Claims Token specification), told us while we validated this
+project:
+
+> "I don't know of anyone that can currently identify the obligations placed on data at the time
+> of collection. I also don't know of anyone that can then prove they erased the data fully and
+> correctly."
+
+This project answers both halves inside one database: the lawful basis is bound to every memory at
+write time in the hash-chained decision log, and every erasure emits a signed, externally anchored
+proof. (On the relationship to the emerging PCT standard, see
+[COMPLIANCE.md](COMPLIANCE.md#relationship-to-the-privacy-claims-token-pct).)
+
 ## Production Readiness
 
 CI runs lint, typecheck, and tests on every push; the erasure path runs on always-on Fargate with
