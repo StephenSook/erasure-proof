@@ -31,6 +31,7 @@ vendor/
 __pycache__/
 *.py[cod]
 .venv/
+.venv-spikes/
 venv/
 .uv/
 .pytest_cache/
@@ -73,6 +74,9 @@ cockroach-data*/
 .vscode/
 .idea/
 *.swp
+
+# --- Seed runtime artifacts (generated when loading a live stack) ---
+db/seed/seeded_subjects.json
 
 # --- Logs ---
 *.log
