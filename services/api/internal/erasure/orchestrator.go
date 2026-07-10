@@ -2,6 +2,7 @@ package erasure
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"time"
@@ -17,12 +18,11 @@ type Orchestrator struct {
 	svc    *Service
 	crypto cryptoclient.Client
 	store  *store.Store
-	now    func() time.Time
 }
 
 // NewOrchestrator builds an Orchestrator over the store and a cryptod client.
 func NewOrchestrator(s *store.Store, crypto cryptoclient.Client) *Orchestrator {
-	return &Orchestrator{svc: New(s), crypto: crypto, store: s, now: time.Now}
+	return &Orchestrator{svc: New(s), crypto: crypto, store: s}
 }
 
 // EraseAndAnchor commits the erasure, then anchors a signed proof post-commit. It returns the
@@ -50,18 +50,22 @@ func (o *Orchestrator) EraseAndAnchor(
 
 	proofRef, aerr := o.anchorProof(ctx, subjectID, res.Seq,
 		hex.EncodeToString(res.SubjectHash), hex.EncodeToString(res.ChainHead),
-		hex.EncodeToString(res.Fingerprint), res.KMSKeyARN, keyState)
+		hex.EncodeToString(res.Fingerprint), res.KMSKeyARN, keyState,
+		res.OccurredAt.UTC().Format(time.RFC3339))
 	return res, proofRef, aerr
 }
 
-// anchorProof signs and anchors the proof via cryptod, then records proof_ref only on success.
+// anchorProof signs and anchors the proof via cryptod, then records the proof only on success.
+// occurredAt is the decision log's own timestamp, NOT anchor time: the reconcile path can run
+// hours after the erasure, and a signed compliance artifact must state when the erasure actually
+// happened.
 func (o *Orchestrator) anchorProof(
 	ctx context.Context, subjectID string, seq int64,
-	subjectHashHex, chainHeadHex, fingerprintHex, kmsKeyARN, keyState string,
+	subjectHashHex, chainHeadHex, fingerprintHex, kmsKeyARN, keyState, occurredAt string,
 ) (string, error) {
 	ar, err := o.crypto.Anchor(ctx, cryptoclient.AnchorRequest{
 		SubjectHash:           subjectHashHex,
-		OccurredAt:            o.now().UTC().Format(time.RFC3339),
+		OccurredAt:            occurredAt,
 		DecisionLogSeq:        seq,
 		ChainHead:             chainHeadHex,
 		WrappedKeyFingerprint: fingerprintHex,
@@ -71,8 +75,25 @@ func (o *Orchestrator) anchorProof(
 	if err != nil {
 		return "", fmt.Errorf("anchor: %w", err)
 	}
-	if _, err := o.store.Operator.Exec(ctx, o.store.Q.MustGet(qSetProofRef), subjectID, ar.ProofRef); err != nil {
-		return ar.ProofRef, fmt.Errorf("record proof_ref: %w", err)
+	// Fail closed on an incomplete response: storing an empty body/signature/key would satisfy the
+	// NOT NULL-free columns, mark the row anchored (proof_ref set), and strand it in a permanent
+	// "pending" that the reconciler never revisits.
+	if ar.ProofCanonical == "" || ar.Signature == "" || ar.SignerPublicKeyPEM == "" {
+		return "", fmt.Errorf("anchor response incomplete (canonical/signature/key); leaving row for the reconciler")
+	}
+	// proof_body is the EXACT canonical bytes the signature covers; the browser verifier checks
+	// them verbatim, so decode and store exactly what cryptod returned.
+	proofBody, err := base64.StdEncoding.DecodeString(ar.ProofCanonical)
+	if err != nil {
+		return "", fmt.Errorf("decode proof_canonical: %w", err)
+	}
+	tag, err := o.store.Operator.Exec(ctx, o.store.Q.MustGet(qSetProofRef),
+		subjectID, ar.ProofRef, string(proofBody), ar.Signature, ar.SignerPublicKeyPEM)
+	if err != nil {
+		return ar.ProofRef, fmt.Errorf("record proof: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return ar.ProofRef, fmt.Errorf("record proof: erasure_record row missing for subject")
 	}
 	return ar.ProofRef, nil
 }
@@ -89,6 +110,7 @@ func (o *Orchestrator) Reconcile(ctx context.Context) (int, error) {
 	type pending struct {
 		subjectID, subjectHashHex, chainHeadHex, fingerprintHex, kmsKeyARN string
 		seq                                                                int64
+		occurredAt                                                         time.Time
 	}
 	var todo []pending
 	for rows.Next() {
@@ -96,7 +118,8 @@ func (o *Orchestrator) Reconcile(ctx context.Context) (int, error) {
 		var seq int64
 		var fingerprint, subjectHash, chainHead []byte
 		var kmsKeyARN *string
-		if err := rows.Scan(&subjectID, &seq, &fingerprint, &kmsKeyARN, &subjectHash, &chainHead); err != nil {
+		var occurredAt time.Time
+		if err := rows.Scan(&subjectID, &seq, &fingerprint, &kmsKeyARN, &subjectHash, &chainHead, &occurredAt); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -111,6 +134,7 @@ func (o *Orchestrator) Reconcile(ctx context.Context) (int, error) {
 			fingerprintHex: hex.EncodeToString(fingerprint),
 			kmsKeyARN:      arn,
 			seq:            seq,
+			occurredAt:     occurredAt,
 		})
 	}
 	rows.Close()
@@ -120,8 +144,13 @@ func (o *Orchestrator) Reconcile(ctx context.Context) (int, error) {
 
 	anchored := 0
 	for _, p := range todo {
+		// key_state: the primary erasure (wrapped key row deleted) always happened, so this is true
+		// for every reconciled row. For imported-material subjects whose second kill switch failed
+		// on the live path it UNDER-reports (the shred outcome is not persisted on erasure_record
+		// yet); it never overclaims. occurred_at is the decision log's own timestamp.
 		if _, err := o.anchorProof(ctx, p.subjectID, p.seq, p.subjectHashHex, p.chainHeadHex,
-			p.fingerprintHex, p.kmsKeyARN, "wrapped_key_destroyed"); err != nil {
+			p.fingerprintHex, p.kmsKeyARN, "wrapped_key_destroyed",
+			p.occurredAt.UTC().Format(time.RFC3339)); err != nil {
 			continue // leave it for the next run
 		}
 		anchored++

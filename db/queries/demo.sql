@@ -20,13 +20,17 @@ FROM subject_keys
 WHERE subject_id = $1;
 
 -- name: erasure_record_get
--- The recorded erasure-proof state for a subject.
+-- The recorded erasure-proof state for a subject, including the signed proof document served to
+-- the browser-side WebCrypto verifier (proof_body is the exact signed bytes).
 SELECT requested_at,
        committed_at,
        decision_log_seq,
        encode(wrapped_key_fingerprint, 'hex') AS fingerprint_hex,
        kms_key_arn,
-       proof_ref
+       proof_ref,
+       proof_body,
+       proof_signature,
+       signer_pubkey_pem
 FROM erasure_record
 WHERE subject_id = $1;
 

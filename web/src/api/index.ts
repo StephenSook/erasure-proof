@@ -6,9 +6,15 @@ import { createHttpClient } from './client'
 import { createMockClient } from './mock'
 import { type DemoApi } from './types'
 
+// The mock is a module singleton so separate pages (the demo console, the proof verifier) share
+// one stateful instance, like they share one real backend. Tests construct their own isolated
+// instances via createMockClient directly.
+let mockSingleton: DemoApi | null = null
+
 export function getClient(): DemoApi {
   if (import.meta.env.VITE_USE_MOCK === '1') {
-    return createMockClient()
+    mockSingleton ??= createMockClient()
+    return mockSingleton
   }
   return createHttpClient(import.meta.env.VITE_API_BASE ?? '')
 }

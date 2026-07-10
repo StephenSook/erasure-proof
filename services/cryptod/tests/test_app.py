@@ -61,6 +61,17 @@ def test_prepare_anchor_verify_flow():
     assert anchored["proof_ref"].startswith("s3://proofs/")
     assert anchored["object_lock_mode"] == "GOVERNANCE"
 
+    # proof_canonical is the EXACT byte string the signature covers (what a browser-side WebCrypto
+    # verifier checks verbatim). Verify the signature over those bytes directly.
+    import base64 as b64mod
+
+    from cryptod import signing as signing_mod
+
+    canonical = b64mod.b64decode(anchored["proof_canonical"])
+    pub_key = signing_mod.load_public_key_pem(anchored["signer_public_key_pem"])
+    signing_mod.verify(pub_key, b64mod.b64decode(anchored["signature"]), canonical)
+    assert anchored["signer_public_key_pem"] == anchored["proof"]["signer_public_key"]
+
     pub = anchored["proof"]["signer_public_key"]
     good = client.post(
         "/proof/verify",

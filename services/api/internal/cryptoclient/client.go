@@ -69,6 +69,12 @@ type AnchorResponse struct {
 	ObjectLockMode string `json:"object_lock_mode"`
 	RetainUntil    string `json:"retain_until"`
 	SHA256         string `json:"sha256"`
+	// ProofCanonical is base64 of the EXACT bytes the signature covers. Stored verbatim
+	// (erasure_record.proof_body) so the browser verifier never re-canonicalizes.
+	ProofCanonical string `json:"proof_canonical"`
+	// SignerPublicKeyPEM is the signer's public key, served alongside the proof so a verifier can
+	// cross-check it against the key embedded in the proof document.
+	SignerPublicKeyPEM string `json:"signer_public_key_pem"`
 }
 
 // Client is the cryptod surface the orchestrator depends on.

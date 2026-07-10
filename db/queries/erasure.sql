@@ -23,8 +23,10 @@ LIMIT 1;
 
 -- name: insert_decision
 -- Append the pseudonymized, hash-chained decision-log row (subject_hash = SHA-256(subject_id)).
+-- RETURNING occurred_at: the signed proof must state the erasure's actual time, not anchor time.
 INSERT INTO decision_log (seq, subject_hash, action, lawful_basis, prev_hash, hash)
-VALUES ($1, $2, $3, $4, $5, $6);
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING occurred_at;
 
 -- name: delete_subject_key
 -- The crypto-shred: delete the only wrapped copy of the subject key.
@@ -44,9 +46,12 @@ INSERT INTO erasure_record (subject_id, decision_log_seq, wrapped_key_fingerprin
 VALUES ($1, $2, $3, $4);
 
 -- name: set_proof_ref
--- Post-commit: attach the anchored, signed proof URI once cryptod has signed and S3-anchored it.
+-- Post-commit: attach the anchored, signed proof once cryptod has signed and S3-anchored it.
+-- proof_body is the EXACT canonical bytes the signature covers; the browser verifier checks them
+-- verbatim, so they are stored as returned, never re-derived.
 UPDATE erasure_record
-SET proof_ref = $2, committed_at = now()
+SET proof_ref = $2, proof_body = $3, proof_signature = $4, signer_pubkey_pem = $5,
+    committed_at = now()
 WHERE subject_id = $1;
 
 -- name: erasure_record_exists
@@ -55,9 +60,11 @@ SELECT EXISTS (SELECT 1 FROM erasure_record WHERE subject_id = $1);
 
 -- name: unanchored_erasures
 -- Erasures whose proof was never anchored (a crash or a failed post-commit anchor). Joined to the
--- decision log to recover the subject_hash and chain head needed to rebuild the proof.
+-- decision log to recover the subject_hash, chain head, and the erasure's actual occurred_at
+-- needed to rebuild the proof. The empty-body predicates are a backstop: an incompletely stored
+-- proof (fail-open bug class) must be re-anchored, not stranded as a permanent "pending".
 SELECT er.subject_id, er.decision_log_seq, er.wrapped_key_fingerprint, er.kms_key_arn,
-       dl.subject_hash, dl.hash
+       dl.subject_hash, dl.hash, dl.occurred_at
 FROM erasure_record er
 JOIN decision_log dl ON dl.seq = er.decision_log_seq
-WHERE er.proof_ref IS NULL;
+WHERE er.proof_ref IS NULL OR er.proof_body IS NULL OR er.proof_body = '';

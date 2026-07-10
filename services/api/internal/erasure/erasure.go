@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/StephenSook/erasure-proof/services/api/internal/chain"
 	"github.com/StephenSook/erasure-proof/services/api/internal/store"
@@ -90,6 +91,9 @@ type Result struct {
 	ChainHead   []byte `json:"decision_log_head"`
 	KMSKeyARN   string `json:"kms_key_arn"`
 	KeyOrigin   string `json:"key_origin"` // GENERATE_DATA_KEY | IMPORTED_MATERIAL
+	// OccurredAt is the decision-log row's own timestamp. The signed proof states THIS time, not
+	// anchor time: the reconcile path can anchor hours after the erasure actually happened.
+	OccurredAt time.Time `json:"occurred_at"`
 }
 
 // Service runs erasures against the operator pool.
@@ -154,9 +158,10 @@ func (svc *Service) Erase(ctx context.Context, subjectID string, action Action, 
 		subjectHash := chain.SubjectHash(subjectID)
 		rowHash := chain.Link(prevHash, newSeq, string(action), string(lawfulBasis), subjectHash)
 
-		// 3. Append the pseudonymized, hash-chained decision-log row.
-		if _, err := tx.Exec(ctx, svc.q.MustGet(qInsertDecision),
-			newSeq, subjectHash, string(action), string(lawfulBasis), prevHash, rowHash); err != nil {
+		// 3. Append the pseudonymized, hash-chained decision-log row, capturing its occurred_at so
+		// the signed proof can state the erasure's actual time (not anchor time).
+		if err := tx.QueryRow(ctx, svc.q.MustGet(qInsertDecision),
+			newSeq, subjectHash, string(action), string(lawfulBasis), prevHash, rowHash).Scan(&res.OccurredAt); err != nil {
 			return fmt.Errorf("insert decision: %w", err)
 		}
 

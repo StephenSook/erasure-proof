@@ -49,12 +49,14 @@ func setup(t *testing.T) (*store.Store, string) {
 	}
 	t.Cleanup(admin.Close)
 
-	schema, err := os.ReadFile(filepath.Join(root, "db", "migrations", "0001_schema.sql"))
-	if err != nil {
-		t.Fatalf("read schema: %v", err)
-	}
-	if _, err := admin.Exec(ctx, string(schema)); err != nil {
-		t.Fatalf("apply schema: %v", err)
+	for _, m := range []string{"0001_schema.sql", "0005_proof_document.sql"} {
+		schema, err := os.ReadFile(filepath.Join(root, "db", "migrations", m))
+		if err != nil {
+			t.Fatalf("read %s: %v", m, err)
+		}
+		if _, err := admin.Exec(ctx, string(schema)); err != nil {
+			t.Fatalf("apply %s: %v", m, err)
+		}
 	}
 
 	st, err := store.Open(ctx, dsn, dsn, filepath.Join(root, "db", "queries"))
@@ -220,12 +222,14 @@ func TestErase_ConcurrentDifferentSubjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer admin.Close()
-	schema, err := os.ReadFile(filepath.Join(root, "db", "migrations", "0001_schema.sql"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := admin.Exec(ctx, string(schema)); err != nil {
-		t.Fatal(err)
+	for _, m := range []string{"0001_schema.sql", "0005_proof_document.sql"} {
+		schema, err := os.ReadFile(filepath.Join(root, "db", "migrations", m))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := admin.Exec(ctx, string(schema)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	st, err := store.Open(ctx, dsn, dsn, filepath.Join(root, "db", "queries"))
 	if err != nil {

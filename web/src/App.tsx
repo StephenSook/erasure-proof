@@ -1,6 +1,8 @@
 import { NavLink, Route, Routes } from 'react-router-dom'
+import { Architecture } from './pages/Architecture'
 import { DemoConsole } from './pages/DemoConsole'
 import { Landing } from './pages/Landing'
+import { ProofVerifier } from './pages/ProofVerifier'
 import { Trust } from './pages/Trust'
 
 const navClass = ({ isActive }: { isActive: boolean }) => (isActive ? 'active' : undefined)
@@ -19,6 +21,12 @@ export function App() {
           <NavLink to="/demo" className={navClass}>
             Demo
           </NavLink>
+          <NavLink to="/proof" className={navClass}>
+            Verify
+          </NavLink>
+          <NavLink to="/architecture" className={navClass}>
+            Architecture
+          </NavLink>
           <NavLink to="/trust" className={navClass}>
             Trust
           </NavLink>
@@ -27,6 +35,9 @@ export function App() {
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/demo" element={<DemoConsole />} />
+        <Route path="/proof" element={<ProofVerifier />} />
+        <Route path="/proof/:subjectId" element={<ProofVerifier />} />
+        <Route path="/architecture" element={<Architecture />} />
         <Route path="/trust" element={<Trust />} />
         <Route path="*" element={<Landing />} />
       </Routes>
