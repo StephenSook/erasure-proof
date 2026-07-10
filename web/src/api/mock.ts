@@ -145,11 +145,18 @@ export function createMockClient(): DemoApi {
       proofBody = ''
       proofSignature = ''
       signerPem = ''
+      // A deterministic 3072-byte vector + its real hash, so the invert + match-check UI path is
+      // exercised end to end even without a GPU.
+      const vec = new Uint8Array(3072).fill(fact.length % 256)
+      const digest = await crypto.subtle.digest('SHA-256', vec)
+      const sha = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
       return {
         source: 'recorded',
         memory_text: fact,
         subject_id: subjectId,
         memory_id: 'bbbbbbbb-0000-4000-8000-000000000002',
+        embedding_b64: btoa(String.fromCharCode(...vec)),
+        embedding_sha256: sha,
       }
     },
     async forensicsAudit(): Promise<ForensicsAudit> {

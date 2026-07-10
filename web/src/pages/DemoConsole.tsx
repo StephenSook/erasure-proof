@@ -170,8 +170,10 @@ export function DemoConsole() {
               ]}
             />
             <div className="note">
-              This memory is now the subject the rest of the loop erases. On a wired deploy it is a
-              real GTR embedding, so the live inversion beat reconstructs your own words.
+              This memory is now the subject the rest of the loop erases.
+              {state.memWriterAvailable
+                ? ' It is a real GTR embedding, so the live inversion beat reconstructs your own words.'
+                : ' (Recorded writer: on a wired deploy the live inversion beat would reconstruct your own words from its embedding.)'}
             </div>
           </>
         )}
@@ -191,7 +193,9 @@ export function DemoConsole() {
       )
     }
     const live = state.liveInversion
-    const matches = live?.input_sha256 === demoMemory.embeddingSha256
+    // Compare against the CURRENT subject's hash (the demo memory, or the judge's agent-written
+    // one), so the match-check is honest whichever memory is loaded.
+    const matches = live?.input_sha256 === state.currentEmbeddingSha256
     return (
       <div className="live-leak">
         <div className="live-leak__head">
@@ -277,6 +281,12 @@ export function DemoConsole() {
                 {String(state.inversion.disclosure ?? '')} The name is reconstructed from the embedding
                 alone, so deleting the row is not enough.
               </div>
+              {state.memWriter && (
+                <div className="note">
+                  The recorded run above is for the demo sentence. Your agent-written memory is a
+                  different vector; use the live GPU button below to invert it.
+                </div>
+              )}
               {liveLeakPanel()}
             </>
           )

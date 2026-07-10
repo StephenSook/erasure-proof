@@ -119,7 +119,7 @@ class LiveEmbedUnavailable(RuntimeError):
     """The Modal embed worker is not configured or did not answer."""
 
 
-def live_embed(text: str, *, modal_url: str, modal_secret: str, timeout_s: float = 200.0) -> dict:
+def live_embed(text: str, *, modal_url: str, modal_secret: str, timeout_s: float = 320.0) -> dict:
     """Embed text on the Modal GPU worker (the canonical GTR pipeline), for the live memory-writer.
 
     Returns {"embedding_b64", "sha256", "dims", "device"}. Raises LiveEmbedUnavailable on any
@@ -142,12 +142,15 @@ def live_embed(text: str, *, modal_url: str, modal_secret: str, timeout_s: float
     except (urllib.error.URLError, TimeoutError, ValueError) as exc:
         raise LiveEmbedUnavailable(f"modal embed call failed: {exc}") from exc
 
+    if not isinstance(body, dict):
+        raise LiveEmbedUnavailable("modal embed returned a non-object body")
     emb = body.get("embedding_b64")
     if not emb:
         raise LiveEmbedUnavailable("modal embed returned no embedding")
     try:
-        if len(base64.b64decode(emb, validate=True)) != 768 * 4:
-            raise LiveEmbedUnavailable("modal embed returned a non-3072-byte vector")
+        decoded = base64.b64decode(emb, validate=True)
     except Exception as exc:  # noqa: BLE001
         raise LiveEmbedUnavailable(f"modal embed returned bad base64: {exc}") from exc
+    if len(decoded) != 768 * 4:
+        raise LiveEmbedUnavailable("modal embed returned a non-3072-byte vector")
     return body

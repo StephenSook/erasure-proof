@@ -176,6 +176,11 @@ func (s *Service) DistillAndEmbed(ctx context.Context, turn string) (string, str
 	if s.forensicsConverser == nil {
 		return "", "", ErrMemoryWriterUnavailable
 	}
+	// Check the embed worker is up BEFORE spending a Bedrock call: a doomed writer (embed down)
+	// would otherwise burn one distil call and a budget slot per click for nothing.
+	if !s.EmbedAvailable(ctx) {
+		return "", "", ErrMemoryWriterUnavailable
+	}
 	select {
 	case s.forensicsSem <- struct{}{}:
 		defer func() { <-s.forensicsSem }()
@@ -193,6 +198,11 @@ func (s *Service) DistillAndEmbed(ctx context.Context, turn string) (string, str
 	fact := strings.TrimSpace(res.Text)
 	if fact == "" {
 		return "", "", errors.New("the model produced no memory to store")
+	}
+	// Bound the fact before embedding: the Modal embed caps text length, and a distil that ran long
+	// (or was prompt-injected to be huge) should not fail opaquely at the GPU after we already paid.
+	if len(fact) > 1000 {
+		fact = fact[:1000]
 	}
 	emb, err := s.inverter.EmbedLive(ctx, fact)
 	if err != nil {

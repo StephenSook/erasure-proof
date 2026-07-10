@@ -21,7 +21,10 @@ export interface DemoState {
   memory?: MemoryView // after stage 1 (and refreshed by stage 3)
   memoryAfter?: MemoryView // after erasure (embedding + key gone)
   inversion?: InversionGoldenRun
-  // Live GPU inversion of the demo embedding: the "run the attack yourself" beat.
+  // Live GPU inversion of the CURRENT subject's embedding: the "run the attack yourself" beat.
+  // These track whichever memory is loaded (the demo memory, or an agent-written one).
+  currentEmbeddingB64: string
+  currentEmbeddingSha256: string
   liveInversion?: LiveInversion
   liveStatus: 'idle' | 'running' | 'done' | 'error'
   liveError?: string
@@ -57,6 +60,8 @@ const zeroSeq = (): Record<StageId, number> =>
 
 const initialState = (): DemoState => ({
   subjectId: '',
+  currentEmbeddingB64: demoMemory.embeddingB64,
+  currentEmbeddingSha256: demoMemory.embeddingSha256,
   liveStatus: 'idle',
   agentStatus: 'idle',
   memWriterStatus: 'idle',
@@ -71,6 +76,9 @@ export function useDemo(injected?: DemoApi) {
   const clientRef = useRef<DemoApi | null>(null)
   clientRef.current ??= injected ?? getClient()
   const subjectRef = useRef('')
+  // The current subject's embedding, mirrored in a ref so runLiveLeak (a stable callback) always
+  // inverts the loaded memory, not a stale-closure value.
+  const embeddingRef = useRef<string>(demoMemory.embeddingB64)
   const [state, setState] = useState<DemoState>(initialState)
 
   const setStatus = useCallback((id: StageId, st: StageStatus, err?: string) => {
@@ -109,9 +117,14 @@ export function useDemo(injected?: DemoApi) {
       step('memory', async (c) => {
         const ing = await c.ingest(demoMemory.contentB64, demoMemory.embeddingB64)
         subjectRef.current = ing.subject_id
+        embeddingRef.current = demoMemory.embeddingB64
         const mem = await c.getMemory(ing.subject_id)
         return {
           subjectId: ing.subject_id,
+          currentEmbeddingB64: demoMemory.embeddingB64,
+          currentEmbeddingSha256: demoMemory.embeddingSha256,
+          memWriter: undefined,
+          memWriterStatus: 'idle' as const,
           memory: mem,
           memoryAfter: undefined,
           erase: undefined,
@@ -139,9 +152,11 @@ export function useDemo(injected?: DemoApi) {
   // Run the attack live on a real GPU, on the exact demo embedding shown. cryptod falls back to the
   // recorded run if the worker is down, so the returned source label always states which path ran.
   const runLiveLeak = useCallback(async () => {
+    // Invert the CURRENT subject's vector (the demo memory, or the judge's agent-written one), so
+    // the live beat reconstructs the actual memory on screen, never a hardcoded one.
     setState((s) => ({ ...s, liveStatus: 'running', liveError: undefined }))
     try {
-      const live = await clientRef.current!.liveInversion(demoMemory.embeddingB64)
+      const live = await clientRef.current!.liveInversion(embeddingRef.current)
       setState((s) => ({ ...s, liveInversion: live, liveStatus: 'done' }))
     } catch (e) {
       setState((s) => ({
@@ -176,18 +191,26 @@ export function useDemo(injected?: DemoApi) {
       try {
         const written = await clientRef.current!.writeMemory(turn)
         subjectRef.current = written.subject_id
+        embeddingRef.current = written.embedding_b64
         const mem = await clientRef.current!.getMemory(written.subject_id)
         setState((s) => ({
           ...s,
           memWriter: written,
           memWriterStatus: 'done',
           subjectId: written.subject_id,
+          currentEmbeddingB64: written.embedding_b64,
+          currentEmbeddingSha256: written.embedding_sha256,
           memory: mem,
           memoryAfter: undefined,
           erase: undefined,
           proof: undefined,
-          // Mark stage 1 complete so the loop can continue on the agent-written memory.
+          inversion: undefined,
+          liveInversion: undefined,
+          liveStatus: 'idle',
+          // Mark stage 1 complete so the loop can continue on the agent-written memory, and clear a
+          // prior stage-1 error so its banner does not linger over this success.
           status: { ...s.status, memory: 'done' },
+          error: { ...s.error, memory: undefined },
           doneSeq: { ...s.doneSeq, memory: s.doneSeq.memory + 1 },
         }))
       } catch (e) {
@@ -270,6 +293,7 @@ export function useDemo(injected?: DemoApi) {
 
   const reset = useCallback(() => {
     subjectRef.current = ''
+    embeddingRef.current = demoMemory.embeddingB64
     clientRef.current = injected ?? getClient()
     setState(initialState())
   }, [injected])

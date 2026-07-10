@@ -127,6 +127,10 @@ export interface MemoryWriterResult {
   memory_text: string
   subject_id: string
   memory_id: string
+  // The stored memory's own vector + hash, so the live-inversion beat can reconstruct the judge's
+  // own words and the match-check compares against the right hash.
+  embedding_b64: string
+  embedding_sha256: string
 }
 
 // AgentToolCall is one recorded tool invocation in the agent's evidence trace.

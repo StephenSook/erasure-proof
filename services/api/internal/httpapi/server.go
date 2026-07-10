@@ -3,7 +3,9 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log"
@@ -369,7 +371,10 @@ func (s *Server) handleAgentMemoryWriter(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a conversation turn is required"})
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 240*time.Second)
+	// Distil (Bedrock) + embed (cold GPU) can each take a while; order the deadlines like the
+	// inversion path so the innermost layer finishes first: Modal 300 < cryptod 320 < HTTP 330 <
+	// this handler 340, and the ingest that follows is quick.
+	ctx, cancel := context.WithTimeout(r.Context(), 340*time.Second)
 	defer cancel()
 
 	fact, embeddingB64, err := s.demo.DistillAndEmbed(ctx, req.Turn)
@@ -394,11 +399,21 @@ func (s *Server) handleAgentMemoryWriter(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "storing the memory failed"})
 		return
 	}
+	// Return the embedding + its hash so the live-inversion beat can invert THIS memory's vector
+	// (the judge's own words) and the match-check compares against the right hash. It is the
+	// judge's own data returned to the same browser that typed it, not a leak of another subject.
+	embHashHex := ""
+	if raw, decErr := base64.StdEncoding.DecodeString(embeddingB64); decErr == nil {
+		sum := sha256.Sum256(raw)
+		embHashHex = hex.EncodeToString(sum[:])
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"source":      "live_bedrock",
-		"memory_text": fact,
-		"subject_id":  res.SubjectID,
-		"memory_id":   res.MemoryID,
+		"source":           "live_bedrock",
+		"memory_text":      fact,
+		"subject_id":       res.SubjectID,
+		"memory_id":        res.MemoryID,
+		"embedding_b64":    embeddingB64,
+		"embedding_sha256": embHashHex,
 	})
 }
 
