@@ -18,6 +18,65 @@ import (
 // ErrAlreadyErased is returned when the subject has no key row (already erased, or never existed).
 var ErrAlreadyErased = errors.New("subject key already destroyed")
 
+// Action and LawfulBasis are the controlled vocabularies written into the permanent, hash-chained
+// decision log. They are validated before anything is hashed so the retained compliance record
+// only ever contains defensible values. Note: these Go consts do not bind the Python verifier;
+// keep the string literals identical on both sides.
+type (
+	Action      string
+	LawfulBasis string
+)
+
+const (
+	ActionErasure Action = "erasure"
+	ActionIngest  Action = "ingest"
+
+	LawfulBasisGDPRArt17  LawfulBasis = "gdpr_art_17"
+	LawfulBasisAIActArt19 LawfulBasis = "ai_act_art_19"
+	LawfulBasisMiFIDII    LawfulBasis = "mifid_ii"
+)
+
+// Valid reports whether the action is in the controlled vocabulary.
+func (a Action) Valid() bool {
+	switch a {
+	case ActionErasure, ActionIngest:
+		return true
+	}
+	return false
+}
+
+// Valid reports whether the lawful basis is in the controlled vocabulary.
+func (b LawfulBasis) Valid() bool {
+	switch b {
+	case LawfulBasisGDPRArt17, LawfulBasisAIActArt19, LawfulBasisMiFIDII:
+		return true
+	}
+	return false
+}
+
+// Query names the erasure closure depends on. RequiredQueries lets main assert at startup that the
+// loaded query set is complete, turning a would-be hot-path panic into a boot-time failure.
+const (
+	qLockSubjectKey      = "lock_subject_key"
+	qChainHead           = "chain_head"
+	qInsertDecision      = "insert_decision"
+	qDeleteSubjectKey    = "delete_subject_key"
+	qNullEmbeddings      = "null_embeddings"
+	qInsertErasureRecord = "insert_erasure_record"
+	qErasureRecordExists = "erasure_record_exists"
+)
+
+// RequiredQueries is the set of named statements Erase looks up; pass it to store.Queries.Require.
+var RequiredQueries = []string{
+	qLockSubjectKey, qChainHead, qInsertDecision, qDeleteSubjectKey,
+	qNullEmbeddings, qInsertErasureRecord, qErasureRecordExists,
+}
+
+// ErrSubjectNotFound is returned when neither a key row nor a prior erasure record exists for the
+// subject (a mistyped or unknown id). It is distinct from ErrAlreadyErased so a caller cannot
+// mistake "did nothing because the id was wrong" for "already handled".
+var ErrSubjectNotFound = errors.New("unknown subject")
+
 // Result reports what the committed transaction recorded.
 type Result struct {
 	Seq         int64  `json:"decision_log_seq"`
@@ -44,14 +103,29 @@ func New(s *store.Store) *Service {
 // The closure is PURE database work plus in-memory hashing: it makes NO network call (KMS, S3,
 // cryptod), so re-running it on a retry is always safe. Cryptographic signing and S3 anchoring
 // happen after this returns, outside the transaction.
-func (svc *Service) Erase(ctx context.Context, subjectID, action, lawfulBasis string) (Result, error) {
+func (svc *Service) Erase(ctx context.Context, subjectID string, action Action, lawfulBasis LawfulBasis) (Result, error) {
+	if !action.Valid() {
+		return Result{}, fmt.Errorf("invalid action %q", action)
+	}
+	if !lawfulBasis.Valid() {
+		return Result{}, fmt.Errorf("invalid lawful basis %q", lawfulBasis)
+	}
+
 	var res Result
 	err := crdbpgx.ExecuteTx(ctx, svc.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		// 1. Lock the subject key row and capture the fingerprint retained in the proof.
 		var fingerprint []byte
-		err := tx.QueryRow(ctx, svc.q.MustGet("lock_subject_key"), subjectID).Scan(&fingerprint)
+		err := tx.QueryRow(ctx, svc.q.MustGet(qLockSubjectKey), subjectID).Scan(&fingerprint)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrAlreadyErased
+			// No key row: distinguish an already-erased subject from an unknown id.
+			var erased bool
+			if e := tx.QueryRow(ctx, svc.q.MustGet(qErasureRecordExists), subjectID).Scan(&erased); e != nil {
+				return fmt.Errorf("check erasure record: %w", e)
+			}
+			if erased {
+				return ErrAlreadyErased
+			}
+			return ErrSubjectNotFound
 		}
 		if err != nil {
 			return fmt.Errorf("lock subject key: %w", err)
@@ -60,35 +134,35 @@ func (svc *Service) Erase(ctx context.Context, subjectID, action, lawfulBasis st
 		// 2. Read the decision-log chain head (no rows = genesis).
 		var seq int64
 		var prevHash []byte
-		err = tx.QueryRow(ctx, svc.q.MustGet("chain_head")).Scan(&seq, &prevHash)
+		err = tx.QueryRow(ctx, svc.q.MustGet(qChainHead)).Scan(&seq, &prevHash)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
-			seq, prevHash = 0, chain.GenesisPrevHash
+			seq, prevHash = 0, chain.GenesisPrevHash()
 		case err != nil:
 			return fmt.Errorf("read chain head: %w", err)
 		}
 		newSeq := seq + 1
 		subjectHash := chain.SubjectHash(subjectID)
-		rowHash := chain.Link(prevHash, newSeq, action, lawfulBasis, subjectHash)
+		rowHash := chain.Link(prevHash, newSeq, string(action), string(lawfulBasis), subjectHash)
 
 		// 3. Append the pseudonymized, hash-chained decision-log row.
-		if _, err := tx.Exec(ctx, svc.q.MustGet("insert_decision"),
-			newSeq, subjectHash, action, lawfulBasis, prevHash, rowHash); err != nil {
+		if _, err := tx.Exec(ctx, svc.q.MustGet(qInsertDecision),
+			newSeq, subjectHash, string(action), string(lawfulBasis), prevHash, rowHash); err != nil {
 			return fmt.Errorf("insert decision: %w", err)
 		}
 
 		// 4. The crypto-shred: delete the only wrapped copy of the subject key.
-		if _, err := tx.Exec(ctx, svc.q.MustGet("delete_subject_key"), subjectID); err != nil {
+		if _, err := tx.Exec(ctx, svc.q.MustGet(qDeleteSubjectKey), subjectID); err != nil {
 			return fmt.Errorf("delete subject key: %w", err)
 		}
 
 		// 5. Purge the live plaintext vector (the durable ciphertext copy stays as provable noise).
-		if _, err := tx.Exec(ctx, svc.q.MustGet("null_embeddings"), subjectID); err != nil {
+		if _, err := tx.Exec(ctx, svc.q.MustGet(qNullEmbeddings), subjectID); err != nil {
 			return fmt.Errorf("null embeddings: %w", err)
 		}
 
 		// 6. Record the erasure.
-		if _, err := tx.Exec(ctx, svc.q.MustGet("insert_erasure_record"),
+		if _, err := tx.Exec(ctx, svc.q.MustGet(qInsertErasureRecord),
 			subjectID, newSeq, fingerprint); err != nil {
 			return fmt.Errorf("insert erasure record: %w", err)
 		}

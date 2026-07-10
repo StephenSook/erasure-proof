@@ -46,3 +46,7 @@ VALUES ($1, $2, $3);
 UPDATE erasure_record
 SET proof_ref = $2, committed_at = now()
 WHERE subject_id = $1;
+
+-- name: erasure_record_exists
+-- Distinguish an already-erased subject from an unknown id when the key row is absent.
+SELECT EXISTS (SELECT 1 FROM erasure_record WHERE subject_id = $1);

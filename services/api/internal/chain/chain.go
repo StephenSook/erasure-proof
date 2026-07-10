@@ -8,8 +8,9 @@ import (
 	"fmt"
 )
 
-// GenesisPrevHash is the prev_hash of the first decision-log row (32 zero bytes).
-var GenesisPrevHash = make([]byte, 32)
+// GenesisPrevHash returns the prev_hash of the first decision-log row (32 zero bytes). It returns
+// a fresh slice each call so no caller can mutate a shared package-global.
+func GenesisPrevHash() []byte { return make([]byte, 32) }
 
 // SubjectHash pseudonymizes a subject id for the decision log: SHA-256 over the id's string form.
 // No raw personal identifier ever reaches the retained log.

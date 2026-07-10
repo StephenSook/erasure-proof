@@ -29,6 +29,9 @@ func LoadQueries(dir string) (Queries, error) {
 			return nil, err
 		}
 	}
+	if len(q) == 0 {
+		return nil, fmt.Errorf("no named statements found in %q (missing -- name: markers?)", dir)
+	}
 	return q, nil
 }
 
@@ -67,6 +70,9 @@ func loadFile(path string, q Queries) error {
 				return err
 			}
 			name = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), marker))
+			if name == "" {
+				return fmt.Errorf("empty statement name after %q in %s", marker, path)
+			}
 			continue
 		}
 		if name == "" {
@@ -84,8 +90,24 @@ func loadFile(path string, q Queries) error {
 	return flush()
 }
 
-// MustGet returns the named statement or panics; a missing name is a programming error caught at
-// startup, not a runtime condition.
+// Require checks that every named statement is present. Call it once at startup (after LoadQueries)
+// with the names the hot paths use, so a missing or misnamed statement fails at boot rather than
+// panicking on the first request.
+func (q Queries) Require(names ...string) error {
+	var missing []string
+	for _, n := range names {
+		if _, ok := q[n]; !ok {
+			missing = append(missing, n)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("missing required queries: %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
+// MustGet returns the named statement or panics. Because Require is called at startup for every
+// name the hot paths use, a panic here indicates a programming error, not a runtime condition.
 func (q Queries) MustGet(name string) string {
 	sql, ok := q[name]
 	if !ok {
