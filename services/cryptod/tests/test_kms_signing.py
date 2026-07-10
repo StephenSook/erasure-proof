@@ -69,9 +69,23 @@ def test_kms_signature_indistinguishable_from_local_verify_path() -> None:
 
 @mock_aws
 def test_wrong_key_spec_fails_at_boot() -> None:
-    # A symmetric key cannot sign; the misconfiguration must surface at construction.
+    # A symmetric key cannot sign; the misconfiguration must surface at construction. Real AWS
+    # rejects GetPublicKey on a symmetric key with a ClientError; moto returns metadata without
+    # SigningAlgorithms, so our own algorithm check raises ValueError. Either way: dead at boot.
+    from botocore.exceptions import ClientError
+
     arn = _make_key(key_spec="SYMMETRIC_DEFAULT", key_usage="ENCRYPT_DECRYPT")
-    with pytest.raises(Exception):  # noqa: B017 - moto raises a client error before our checks
+    with pytest.raises((ClientError, ValueError)):
+        signing.KmsSigner(arn, REGION)
+
+
+@mock_aws
+def test_secp256k1_key_rejected_at_boot() -> None:
+    """The sharp edge: a secp256k1 SIGN_VERIFY key also reports ECDSA_SHA_256, signs, and verifies
+    in pyca (curve-agnostic), but the browser verifier imports the SPKI as P-256 and would fail on
+    every proof. The curve pin must kill it at construction."""
+    arn = _make_key(key_spec="ECC_SECG_P256K1", key_usage="SIGN_VERIFY")
+    with pytest.raises(ValueError, match="not P-256"):
         signing.KmsSigner(arn, REGION)
 
 

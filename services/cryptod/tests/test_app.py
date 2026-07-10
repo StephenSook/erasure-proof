@@ -164,6 +164,47 @@ def test_anchor_signs_via_kms_when_configured():
     )
 
 
+def test_anchor_sign_failure_is_distinguishable(monkeypatch):
+    """A KMS Sign failure after boot (key disabled, permission regression) must surface as its own
+    502 naming the signing step and the AWS error code, not a bare 500 identical to an S3 outage.
+    moto signs even with a disabled key, so the request-time failure is injected directly."""
+    from botocore.exceptions import ClientError
+
+    from cryptod import proof as proof_mod
+
+    cfg = settings.Settings(
+        aws_region="us-east-1",
+        kms_wrapping_key_arn="",
+        s3_proof_bucket="proofs",
+        s3_object_lock_mode="GOVERNANCE",
+        s3_retain_days=1,
+        ecdsa_signing_key_path="",
+    )
+    client = TestClient(create_app(cfg))  # ephemeral signer; boot succeeds
+
+    def _kms_down(signer, doc):
+        raise ClientError(
+            {"Error": {"Code": "DisabledException", "Message": "key is disabled"}}, "Sign"
+        )
+
+    monkeypatch.setattr(proof_mod, "sign_proof", _kms_down)
+
+    r = client.post(
+        "/anchor",
+        json={
+            "subject_hash": "ab" * 32,
+            "occurred_at": "2026-07-10T00:00:00Z",
+            "decision_log_seq": 1,
+            "chain_head": "cd" * 32,
+            "wrapped_key_fingerprint": "ef" * 32,
+            "kms_key_arn": "arn:aws:kms:us-east-1:1:key/demo",
+            "key_state": "Enabled",
+        },
+    )
+    assert r.status_code == 502
+    assert r.json()["detail"] == "proof signing failed: DisabledException"
+
+
 @mock_aws
 def test_compliance_mode_accepts_kms_signer():
     # A KMS signing key is durable across restarts, so it satisfies the COMPLIANCE fail-closed

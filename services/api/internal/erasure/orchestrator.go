@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/StephenSook/erasure-proof/services/api/internal/cryptoclient"
@@ -191,7 +192,11 @@ func (o *Orchestrator) Reconcile(ctx context.Context) (int, error) {
 		if _, err := o.anchorProof(ctx, p.subjectID, p.seq, p.subjectHashHex, p.chainHeadHex,
 			p.fingerprintHex, p.kmsKeyARN, "wrapped_key_destroyed",
 			p.occurredAt.UTC().Format(time.RFC3339), root, size); err != nil {
-			continue // leave it for the next run
+			// Leave the row for the next run, but say WHY it failed: a systemic cause (signing key
+			// disabled, IAM regression) looks identical to transient noise if these are swallowed,
+			// and "anchored 0" alone gives an operator nothing to act on.
+			log.Printf("reconcile: anchor failed for seq=%d: %v", p.seq, err)
+			continue
 		}
 		anchored++
 	}

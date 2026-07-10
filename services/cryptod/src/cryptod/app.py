@@ -18,6 +18,7 @@ import binascii
 import hashlib
 import logging
 
+from botocore.exceptions import ClientError
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from fastapi import FastAPI, HTTPException, Response
@@ -84,18 +85,44 @@ class EmbedRequest(BaseModel):
     text: str  # the fact to embed (canonical GTR pipeline, on the Modal GPU)
 
 
+def _signer_fingerprint(pub_pem: str) -> str:
+    return hashlib.sha256(pub_pem.encode()).hexdigest()[:16]
+
+
 def _load_signer(cfg: settings.Settings) -> signing.ProofSigner:
+    # Every branch logs which signer was selected and its public-key fingerprint: proofs land in
+    # write-once storage, so "which key is signing" must never be ambiguous, especially when both
+    # KMS_SIGNING_KEY_ARN and a leftover ECDSA_SIGNING_KEY_PATH are set (KMS wins).
+    #
     # Preferred: a KMS asymmetric key. The private key never exists in this process; the task
     # holds only kms:Sign + kms:GetPublicKey on the one signing key, and every Sign call lands in
-    # CloudTrail. Fails at boot (GetPublicKey) on a wrong key or missing permission.
+    # CloudTrail. Fails at boot (GetPublicKey) on a wrong key, wrong curve, or missing permission.
     if cfg.kms_signing_key_arn:
-        return signing.KmsSigner(cfg.kms_signing_key_arn, cfg.aws_region)
+        kms_signer = signing.KmsSigner(cfg.kms_signing_key_arn, cfg.aws_region)
+        log.info(
+            "cryptod: proof signer = kms:%s (pubkey sha256 %s)",
+            cfg.kms_signing_key_arn,
+            _signer_fingerprint(kms_signer.public_key_pem),
+        )
+        return kms_signer
     if cfg.ecdsa_signing_key_path:
         with open(cfg.ecdsa_signing_key_path, "rb") as f:
             key = load_pem_private_key(f.read(), password=None)
         if not isinstance(key, ec.EllipticCurvePrivateKey):
             raise TypeError("configured signing key is not an EC private key")
-        return signing.LocalSigner(key)
+        # Same curve pin as KmsSigner: the browser verifier imports the SPKI as P-256, so any
+        # other EC curve would sign proofs that verify here but fail for every judge.
+        if not isinstance(key.curve, ec.SECP256R1):
+            raise ValueError(
+                f"configured signing key is on curve {key.curve.name}, not P-256 (secp256r1)"
+            )
+        local_signer = signing.LocalSigner(key)
+        log.info(
+            "cryptod: proof signer = file:%s (pubkey sha256 %s)",
+            cfg.ecdsa_signing_key_path,
+            _signer_fingerprint(local_signer.public_key_pem),
+        )
+        return local_signer
     # No configured key. An ephemeral key vanishes on restart, so proofs it signs can never be
     # attributed later. Fail closed when anchoring to immutable COMPLIANCE storage; otherwise warn
     # loudly so an ephemeral signer is never mistaken for a configured one.
@@ -105,12 +132,14 @@ def _load_signer(cfg: settings.Settings) -> signing.ProofSigner:
             "Lock: an ephemeral signer would write permanently-locked proofs signed by a key "
             "that is lost on restart"
         )
+    ephemeral = signing.LocalSigner(signing.generate_private_key())
     log.warning(
         "cryptod: no KMS_SIGNING_KEY_ARN or ECDSA_SIGNING_KEY_PATH set; using an EPHEMERAL "
-        "signer. Proofs will NOT verify across restarts. Configure a signer for anything but "
-        "local development."
+        "signer (pubkey sha256 %s). Proofs will NOT verify across restarts. Configure a signer "
+        "for anything but local development.",
+        _signer_fingerprint(ephemeral.public_key_pem),
     )
-    return signing.LocalSigner(signing.generate_private_key())
+    return ephemeral
 
 
 def create_app(cfg: settings.Settings | None = None) -> FastAPI:
@@ -247,12 +276,23 @@ def create_app(cfg: settings.Settings | None = None) -> FastAPI:
             merkle_root_hex=req.merkle_root,
             tree_size=req.tree_size,
         )
-        signature = proof.sign_proof(signer, doc)
+        # Sign and anchor fail differently (a KMS permission/key-state regression needs an IAM or
+        # key fix; an S3 outage needs none), so each surfaces its own 502 with the AWS error code
+        # only (never key material). Sign strictly precedes the put: no unsigned proof can anchor.
+        try:
+            signature = proof.sign_proof(signer, doc)
+        except ClientError as e:
+            code = e.response.get("Error", {}).get("Code", "unknown")
+            raise HTTPException(502, f"proof signing failed: {code}") from e
         body = proof.canonical_bytes(doc)
         key = f"{req.subject_hash}/{req.decision_log_seq}.json"
-        result = anchor.S3Anchor(cfg.aws_region).anchor(
-            cfg.s3_proof_bucket, key, body, cfg.s3_object_lock_mode, cfg.s3_retain_days
-        )
+        try:
+            result = anchor.S3Anchor(cfg.aws_region).anchor(
+                cfg.s3_proof_bucket, key, body, cfg.s3_object_lock_mode, cfg.s3_retain_days
+            )
+        except ClientError as e:
+            code = e.response.get("Error", {}).get("Code", "unknown")
+            raise HTTPException(502, f"proof anchor failed: {code}") from e
         return {
             "proof": doc,
             "signature": _b64e(signature),

@@ -11,7 +11,7 @@ in production"). Two signer implementations share the ProofSigner interface:
   is in CloudTrail).
 
 Both produce DER-encoded ECDSA-with-SHA-256 signatures over the same bytes, so the verification
-path (here, the Lambda verifier, and the browser's WebCrypto) is identical regardless of signer.
+path (cryptod's /proof/verify and the browser's WebCrypto) is identical regardless of signer.
 """
 
 from __future__ import annotations
@@ -109,6 +109,14 @@ class KmsSigner:
         der_public = serialization.load_der_public_key(meta["PublicKey"])
         if not isinstance(der_public, ec.EllipticCurvePublicKey):
             raise ValueError(f"KMS key {key_arn} is not an EC key")
+        # ECDSA_SHA_256 alone does not pin the curve: a secp256k1 SIGN_VERIFY key also reports it,
+        # signs, and verifies here (pyca is curve-agnostic), but the browser verifier imports the
+        # SPKI as P-256 and would fail on every proof. Pin the curve so the mismatch dies at boot.
+        if not isinstance(der_public.curve, ec.SECP256R1):
+            raise ValueError(
+                f"KMS key {key_arn} is on curve {der_public.curve.name}, not P-256 (secp256r1); "
+                "proofs must verify in browsers that import the key as P-256"
+            )
         self.public_key_pem = public_key_pem(der_public)
 
     def sign(self, payload: bytes) -> bytes:

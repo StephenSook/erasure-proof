@@ -70,6 +70,22 @@ func main() {
 
 	srv := httpapi.New(st, orch, ingester, demoSvc, os.Getenv("GIT_SHA"))
 
+	// One reconcile pass at boot: erasures whose post-commit anchor failed (crash, KMS or S3
+	// outage) get their proof anchored at every deploy/restart, so the reconciler is not
+	// manual-only. cmd/anchor-reconciler remains for scheduled or ad-hoc runs between restarts.
+	go func() {
+		rctx, rcancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer rcancel()
+		n, rerr := orch.Reconcile(rctx)
+		if rerr != nil {
+			log.Printf("boot reconcile: %v", rerr)
+			return
+		}
+		if n > 0 {
+			log.Printf("boot reconcile: anchored %d previously un-anchored erasure proof(s)", n)
+		}
+	}()
+
 	// Live decision-log changefeed -> SSE. The consumer opens its OWN dedicated connection (not the
 	// operator pool) so the always-on feed never subtracts a connection from the erasure/read paths.
 	// If rangefeeds are disabled the feed just retries and the stream serves the snapshot only.
