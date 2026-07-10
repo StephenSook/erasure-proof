@@ -66,6 +66,13 @@ func main() {
 			demoSvc.SetForensicsConverser(converser)
 			log.Print("live Bedrock forensics agent enabled")
 		}
+		titan, tErr := agent.NewBedrockTitan(startCtx)
+		if tErr != nil {
+			log.Printf("warning: AGENTS_LIVE=1 but Titan client init failed, side-by-side embedding disabled: %v", tErr)
+		} else {
+			demoSvc.SetTitanEmbedder(titan)
+			log.Print("live Titan v2 side-by-side embedding enabled")
+		}
 	}
 
 	srv := httpapi.New(st, orch, ingester, demoSvc, os.Getenv("GIT_SHA"))

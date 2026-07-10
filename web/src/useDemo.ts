@@ -12,6 +12,7 @@ import {
   type MemoryWriterResult,
   type ProofView,
   type RbacResult,
+  type TitanEmbedding,
 } from './api'
 import { demoMemory } from './data/demoMemory'
 import { STAGES, type StageId, type StageStatus } from './demoStages'
@@ -39,6 +40,11 @@ export interface DemoState {
   memWriterStatus: 'idle' | 'running' | 'done' | 'error'
   memWriterError?: string
   memWriterAvailable?: boolean
+  // Live AWS-native (Titan v2) side-by-side embedding of the memory sentence on screen.
+  titan?: TitanEmbedding
+  titanStatus: 'idle' | 'running' | 'done' | 'error'
+  titanError?: string
+  titanAvailable?: boolean
   // Live decision-log timeline, fed by the CockroachDB changefeed over SSE.
   streamRows: DecisionRow[]
   streamStatus: 'connecting' | 'live' | 'snapshot' | 'error'
@@ -68,6 +74,7 @@ const initialState = (): DemoState => ({
   liveStatus: 'idle',
   agentStatus: 'idle',
   memWriterStatus: 'idle',
+  titanStatus: 'idle',
   streamRows: [],
   streamStatus: 'connecting',
   status: idleStatus(),
@@ -180,9 +187,10 @@ export function useDemo(injected?: DemoApi) {
         ...s,
         agentAvailable: cfg.forensics_available ?? cfg.live_available,
         memWriterAvailable: cfg.memory_writer_available ?? false,
+        titanAvailable: cfg.titan_available ?? false,
       }))
     } catch {
-      setState((s) => ({ ...s, agentAvailable: false, memWriterAvailable: false }))
+      setState((s) => ({ ...s, agentAvailable: false, memWriterAvailable: false, titanAvailable: false }))
     }
   }, [])
 
@@ -246,6 +254,23 @@ export function useDemo(injected?: DemoApi) {
         ...s,
         agentStatus: 'error',
         agentError: e instanceof Error ? e.message : String(e),
+      }))
+    }
+  }, [])
+
+  // Embed the memory sentence on screen with AWS-native Titan v2, live, for the side-by-side
+  // panel. The caller passes the exact text the console displays, so the panel's claim ("the same
+  // sentence, embedded with Titan") is true by construction.
+  const runTitan = useCallback(async (text: string) => {
+    setState((s) => ({ ...s, titanStatus: 'running', titanError: undefined }))
+    try {
+      const titan = await clientRef.current!.titanEmbed(text)
+      setState((s) => ({ ...s, titan, titanStatus: 'done' }))
+    } catch (e) {
+      setState((s) => ({
+        ...s,
+        titanStatus: 'error',
+        titanError: e instanceof Error ? e.message : String(e),
       }))
     }
   }, [])
@@ -330,6 +355,7 @@ export function useDemo(injected?: DemoApi) {
       checkAgent,
       runForensics,
       runMemoryWriter,
+      runTitan,
       runEnvelope,
       runErase,
       runDurability,
@@ -345,6 +371,7 @@ export function useDemo(injected?: DemoApi) {
       checkAgent,
       runForensics,
       runMemoryWriter,
+      runTitan,
       runEnvelope,
       runErase,
       runDurability,

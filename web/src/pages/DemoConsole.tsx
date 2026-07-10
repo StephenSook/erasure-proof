@@ -241,6 +241,60 @@ export function DemoConsole() {
     )
   }
 
+  function titanPanel() {
+    // The AWS-native comparison: the same sentence, embedded with Titan v2. Honest on both sides:
+    // no dead button when Bedrock is unwired, and no pretending Titan's lack of a public inverter
+    // means Titan embeddings are safe to keep.
+    if (!state.titanAvailable) {
+      return (
+        <div className="note">
+          On the live deployment this panel also embeds the same sentence with AWS-native Titan v2
+          (Bedrock). Titan has no public inverter today; that absence is not proof of
+          irreversibility, which is why the erasure destroys the key rather than trusting model
+          obscurity.
+        </div>
+      )
+    }
+    const memText = state.memWriter?.memory_text ?? demoMemory.text
+    const titan = state.titan
+    return (
+      <div className="live-leak">
+        <div className="live-leak__head">
+          <Badge kind="live">Live Bedrock</Badge>
+          <button
+            className="btn btn--small"
+            onClick={() => void actions.runTitan(memText)}
+            disabled={state.titanStatus === 'running'}
+          >
+            {state.titanStatus === 'running'
+              ? 'Embedding with Titan v2...'
+              : 'Embed the same sentence with AWS-native Titan v2'}
+          </button>
+        </div>
+        {state.titanError && <div className="note note--error">{state.titanError}</div>}
+        {titan && state.titanStatus === 'done' && (
+          <>
+            <KeyValue
+              items={[
+                { k: 'model', v: titan.model_id },
+                { k: 'dimensions', v: `${titan.dimensions} (vs GTR 768)` },
+                { k: 'titan vector sha-256', v: short(titan.sha256, 24) },
+                { k: 'input tokens', v: String(titan.input_token_count) },
+                { k: 'public inverter', v: 'none published for Titan today', tone: 'ok' },
+              ]}
+            />
+            <div className="note">
+              Same sentence, two vectors. The GTR vector above is invertible with a public tool;
+              no public inverter exists for this Titan vector today, but that is an accident of
+              tooling, not a guarantee. The crypto-erasure below protects both the same way:
+              destroy the key, and what remains is noise regardless of which model embedded it.
+            </div>
+          </>
+        )}
+      </div>
+    )
+  }
+
   function stageResult(id: StageId) {
     switch (id) {
       case 'memory':
@@ -288,6 +342,7 @@ export function DemoConsole() {
                 </div>
               )}
               {liveLeakPanel()}
+              {titanPanel()}
             </>
           )
         )

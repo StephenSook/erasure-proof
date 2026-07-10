@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/StephenSook/erasure-proof/services/api/internal/agent"
 	"github.com/StephenSook/erasure-proof/services/api/internal/chain"
 	"github.com/StephenSook/erasure-proof/services/api/internal/demo"
 	"github.com/StephenSook/erasure-proof/services/api/internal/merkle"
@@ -432,6 +433,60 @@ func TestForensicsAgent_UnavailableWithoutConverser(t *testing.T) {
 	}
 	if _, err := svc.ForensicsAudit(context.Background(), "s1"); !errors.Is(err, demo.ErrForensicsUnavailable) {
 		t.Errorf("want ErrForensicsUnavailable, got %v", err)
+	}
+}
+
+// stubTitan records the text it was asked to embed and returns a fixed embedding.
+type stubTitan struct{ lastText string }
+
+func (s *stubTitan) EmbedText(_ context.Context, text string) (agent.TitanEmbedding, error) {
+	s.lastText = text
+	return agent.TitanEmbedding{
+		ModelID: "amazon.titan-embed-text-v2:0", Dimensions: 1024,
+		EmbeddingB64: "AAAA", Sha256: "ab" + "cd", TokenCount: 7,
+	}, nil
+}
+
+func TestTitanEmbed_UnavailableWithoutEmbedder(t *testing.T) {
+	svc := demo.New(&store.Store{}, stubInverter{})
+	if svc.TitanAvailable() {
+		t.Error("titan should be unavailable until an embedder is wired")
+	}
+	if _, err := svc.TitanEmbed(context.Background(), "hello"); !errors.Is(err, demo.ErrTitanUnavailable) {
+		t.Errorf("want ErrTitanUnavailable, got %v", err)
+	}
+}
+
+func TestTitanEmbed_SharesAgentBudgetAndTruncates(t *testing.T) {
+	svc := demo.New(&store.Store{}, stubInverter{})
+	stub := &stubTitan{}
+	svc.SetTitanEmbedder(stub)
+	base := time.Unix(1_700_000_000, 0)
+	svc.SetNowForTest(func() time.Time { return base })
+
+	// An oversized input is bounded before it reaches Bedrock.
+	long := strings.Repeat("x", 2000)
+	if _, err := svc.TitanEmbed(context.Background(), long); err != nil {
+		t.Fatalf("titan embed: %v", err)
+	}
+	if len(stub.lastText) != 1000 {
+		t.Errorf("embedded text length = %d, want truncated to 1000", len(stub.lastText))
+	}
+
+	// Titan draws on the SAME rolling-hour agent budget as forensics/memory-writer (one Bedrock
+	// quota, one guard); exhausting it via Titan refuses the next call.
+	for i := 1; i < demo.ForensicsMaxPerHourForTest; i++ {
+		if _, err := svc.TitanEmbed(context.Background(), "hi"); err != nil {
+			t.Fatalf("run %d within budget failed: %v", i, err)
+		}
+	}
+	if _, err := svc.TitanEmbed(context.Background(), "hi"); !errors.Is(err, demo.ErrForensicsBudget) {
+		t.Fatalf("want ErrForensicsBudget after exhausting the shared budget, got %v", err)
+	}
+	// The window rolls: allowed again an hour later.
+	svc.SetNowForTest(func() time.Time { return base.Add(61 * time.Minute) })
+	if _, err := svc.TitanEmbed(context.Background(), "hi"); err != nil {
+		t.Fatalf("want a fresh allowance after the window rolled, got %v", err)
 	}
 }
 

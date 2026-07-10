@@ -143,6 +143,18 @@ export interface AgentConfig {
   live_available: boolean
   forensics_available?: boolean
   memory_writer_available?: boolean
+  titan_available?: boolean
+}
+
+// TitanEmbedding is one live AWS-native (Titan v2) embedding, in the same wire shape as the GTR
+// path (little-endian float32 base64 + its SHA-256) so the two vectors are directly comparable.
+export interface TitanEmbedding {
+  source: string
+  model_id: string
+  dimensions: number
+  embedding_b64: string
+  sha256: string
+  input_token_count: number
 }
 
 // MemoryWriterResult is the agent-written memory: the distilled fact and where it was stored.
@@ -187,6 +199,7 @@ export interface DemoApi {
   getAgentConfig(): Promise<AgentConfig>
   forensicsAudit(subjectId: string): Promise<ForensicsAudit>
   writeMemory(turn: string): Promise<MemoryWriterResult>
+  titanEmbed(text: string): Promise<TitanEmbedding>
   erase(subjectId: string, lawfulBasis?: string): Promise<EraseResponse>
   getProof(subjectId: string): Promise<ProofView>
   getDecisionLog(): Promise<DecisionRow[]>
