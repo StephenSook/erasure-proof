@@ -193,3 +193,19 @@ jobs:
               echo "::error::agent_worker was able to run: $op"; cat /tmp/o; exit 1
             fi
           done
+      - name: Operator role can run the erasure's locking read (SELECT FOR UPDATE)
+        # Regression: CockroachDB requires UPDATE privilege for SELECT ... FOR UPDATE, and the
+        # erasure transaction opens with one on subject_keys. The Go tests run as root, so only a
+        # role-scoped check catches a missing grant (found live in the full-stack local run).
+        run: |
+          docker exec -i crdb ./cockroach sql --insecure -d erasure <<'SQL'
+          INSERT INTO subject_keys (subject_id, wrapped_key, kms_key_arn, key_origin, wrapped_key_fingerprint)
+            VALUES ('11111111-2222-4333-8444-555555555555', x'01', 'arn:test', 'GENERATE_DATA_KEY', x'aa');
+          SQL
+          echo "-- as operator: the erasure's opening locking read must succeed --"
+          if docker exec -i crdb ./cockroach sql --insecure -d erasure -u operator -e \
+            "SELECT wrapped_key_fingerprint FROM subject_keys WHERE subject_id = '11111111-2222-4333-8444-555555555555' FOR UPDATE" \
+            2>&1 | tee /tmp/o | grep -qi "does not have\|permission\|denied"; then
+            echo "::error::operator lacks the privilege for SELECT FOR UPDATE on subject_keys"; cat /tmp/o; exit 1
+          fi
+          echo "operator locking read OK"

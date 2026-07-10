@@ -30,7 +30,10 @@ REVOKE UPDATE, DELETE ON decision_log FROM agent_worker;   -- makes the log appe
 -- subject's key + first memory). Key provisioning is deliberately NOT an agent_worker power.
 GRANT INSERT, SELECT ON decision_log TO operator;
 REVOKE UPDATE, DELETE ON decision_log FROM operator;       -- operator also cannot rewrite history
-GRANT INSERT, SELECT, DELETE ON subject_keys TO operator;  -- provision (INSERT) + erase (DELETE)
+-- UPDATE is required because the erasure transaction opens with SELECT ... FOR UPDATE on the key
+-- row, and CockroachDB requires UPDATE privilege for a locking read. The operator never actually
+-- rewrites a key; the lock orders the erasure against concurrent ingests.
+GRANT INSERT, SELECT, UPDATE, DELETE ON subject_keys TO operator;
 GRANT INSERT, SELECT, UPDATE ON agent_memory TO operator;  -- provision memory + NULL the embedding
 GRANT INSERT, SELECT, UPDATE ON erasure_record TO operator;
 
