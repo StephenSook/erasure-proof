@@ -67,6 +67,7 @@ const (
 	qErasureRecordExists = "erasure_record_exists"
 	qSetProofRef         = "set_proof_ref"
 	qUnanchoredErasures  = "unanchored_erasures"
+	qDecisionLogLeaves   = "decision_log_leaves"
 )
 
 // RequiredQueries is the set of named statements the erasure path and its post-commit anchoring and
@@ -74,7 +75,7 @@ const (
 var RequiredQueries = []string{
 	qLockSubjectKey, qChainHead, qInsertDecision, qDeleteSubjectKey,
 	qNullEmbeddings, qInsertErasureRecord, qErasureRecordExists,
-	qSetProofRef, qUnanchoredErasures,
+	qSetProofRef, qUnanchoredErasures, qDecisionLogLeaves,
 }
 
 // ErrSubjectNotFound is returned when neither a key row nor a prior erasure record exists for the

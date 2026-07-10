@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/StephenSook/erasure-proof/services/api/internal/cryptoclient"
+	"github.com/StephenSook/erasure-proof/services/api/internal/merkle"
 	"github.com/StephenSook/erasure-proof/services/api/internal/store"
 )
 
@@ -48,11 +49,39 @@ func (o *Orchestrator) EraseAndAnchor(
 		keyState = sh.KeyState
 	}
 
+	root, size, merr := o.merkleHead(ctx)
+	if merr != nil {
+		// The erasure is durably committed; a failure to compute the tree head only defers the
+		// proof to the reconciler, it does not undo the erasure.
+		return res, "", fmt.Errorf("merkle head: %w", merr)
+	}
 	proofRef, aerr := o.anchorProof(ctx, subjectID, res.Seq,
 		hex.EncodeToString(res.SubjectHash), hex.EncodeToString(res.ChainHead),
 		hex.EncodeToString(res.Fingerprint), res.KMSKeyARN, keyState,
-		res.OccurredAt.UTC().Format(time.RFC3339))
+		res.OccurredAt.UTC().Format(time.RFC3339), root, size)
 	return res, proofRef, aerr
+}
+
+// merkleHead computes the RFC 6962 Merkle root over the current decision-log leaves and the tree
+// size. The erasure's own row is already committed, so the returned tree includes it.
+func (o *Orchestrator) merkleHead(ctx context.Context) (string, int, error) {
+	rows, err := o.store.Operator.Query(ctx, o.store.Q.MustGet(qDecisionLogLeaves))
+	if err != nil {
+		return "", 0, err
+	}
+	defer rows.Close()
+	var leaves [][]byte
+	for rows.Next() {
+		var h []byte
+		if err := rows.Scan(&h); err != nil {
+			return "", 0, err
+		}
+		leaves = append(leaves, h)
+	}
+	if err := rows.Err(); err != nil {
+		return "", 0, err
+	}
+	return hex.EncodeToString(merkle.Root(leaves)), len(leaves), nil
 }
 
 // anchorProof signs and anchors the proof via cryptod, then records the proof only on success.
@@ -62,6 +91,7 @@ func (o *Orchestrator) EraseAndAnchor(
 func (o *Orchestrator) anchorProof(
 	ctx context.Context, subjectID string, seq int64,
 	subjectHashHex, chainHeadHex, fingerprintHex, kmsKeyARN, keyState, occurredAt string,
+	merkleRootHex string, treeSize int,
 ) (string, error) {
 	ar, err := o.crypto.Anchor(ctx, cryptoclient.AnchorRequest{
 		SubjectHash:           subjectHashHex,
@@ -71,6 +101,8 @@ func (o *Orchestrator) anchorProof(
 		WrappedKeyFingerprint: fingerprintHex,
 		KMSKeyARN:             kmsKeyARN,
 		KeyState:              keyState,
+		MerkleRoot:            merkleRootHex,
+		TreeSize:              treeSize,
 	})
 	if err != nil {
 		return "", fmt.Errorf("anchor: %w", err)
@@ -142,6 +174,14 @@ func (o *Orchestrator) Reconcile(ctx context.Context) (int, error) {
 		return 0, err
 	}
 
+	// The decision log does not change during a reconcile run (no new erasures), so compute the
+	// Merkle head once; every reconciled proof attests the same current tree, which includes each
+	// row's own seq.
+	root, size, merr := o.merkleHead(ctx)
+	if merr != nil {
+		return 0, merr
+	}
+
 	anchored := 0
 	for _, p := range todo {
 		// key_state: the primary erasure (wrapped key row deleted) always happened, so this is true
@@ -150,7 +190,7 @@ func (o *Orchestrator) Reconcile(ctx context.Context) (int, error) {
 		// yet); it never overclaims. occurred_at is the decision log's own timestamp.
 		if _, err := o.anchorProof(ctx, p.subjectID, p.seq, p.subjectHashHex, p.chainHeadHex,
 			p.fingerprintHex, p.kmsKeyARN, "wrapped_key_destroyed",
-			p.occurredAt.UTC().Format(time.RFC3339)); err != nil {
+			p.occurredAt.UTC().Format(time.RFC3339), root, size); err != nil {
 			continue // leave it for the next run
 		}
 		anchored++

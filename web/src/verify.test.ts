@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { b64ToBytes, bytesToHex, pemToDer, sha256Hex, toRawSignature, verifyProofSignature } from './verify'
+import { b64ToBytes, bytesToHex, merkleLeafHash, merkleNodeHash, pemToDer, sha256Hex, toRawSignature, verifyInclusion, verifyProofSignature } from './verify'
 
 // These tests exercise the real WebCrypto implementation (Node's webcrypto under vitest): generate
 // a P-256 key, sign, and drive the exact code path the browser runs.
@@ -154,5 +154,70 @@ describe('toRawSignature edge vectors (fixed bytes, deterministic)', () => {
     const wide = new Uint8Array(35).fill(0x44)
     const der = new Uint8Array([0x30, 2 + 35 + 2 + 1, 0x02, 35, ...wide, 0x02, 1, 0x01])
     expect(() => toRawSignature(der)).toThrow(/wider/)
+  })
+})
+
+describe('verifyInclusion (RFC 6962, browser side)', () => {
+  const enc = (s: string) => new TextEncoder().encode(s)
+
+  it('verifies a 2-leaf tree inclusion for both leaves', async () => {
+    const la = await merkleLeafHash(enc('a'))
+    const lb = await merkleLeafHash(enc('b'))
+    const root = bytesToHex(await merkleNodeHash(la, lb))
+    // leaf 0: sibling is Lb; leaf 1: sibling is La.
+    expect(await verifyInclusion(bytesToHex(la), 0, 2, [bytesToHex(lb)], root)).toBe(true)
+    expect(await verifyInclusion(bytesToHex(lb), 1, 2, [bytesToHex(la)], root)).toBe(true)
+  })
+
+  it('verifies an unbalanced 3-leaf tree (index 0 and 2)', async () => {
+    const la = await merkleLeafHash(enc('a'))
+    const lb = await merkleLeafHash(enc('b'))
+    const lc = await merkleLeafHash(enc('c'))
+    const nodeAB = await merkleNodeHash(la, lb)
+    const root = bytesToHex(await merkleNodeHash(nodeAB, lc)) // n=3 splits at k=2
+    // index 0: path leaf-to-root = [Lb, Lc]
+    expect(
+      await verifyInclusion(bytesToHex(la), 0, 3, [bytesToHex(lb), bytesToHex(lc)], root),
+    ).toBe(true)
+    // index 2: path = [nodeAB]
+    expect(await verifyInclusion(bytesToHex(lc), 2, 3, [bytesToHex(nodeAB)], root)).toBe(true)
+  })
+
+  it('rejects a tampered leaf, wrong index, and out-of-range index', async () => {
+    const la = await merkleLeafHash(enc('a'))
+    const lb = await merkleLeafHash(enc('b'))
+    const root = bytesToHex(await merkleNodeHash(la, lb))
+    const wrong = bytesToHex(await merkleLeafHash(enc('x')))
+    expect(await verifyInclusion(wrong, 0, 2, [bytesToHex(lb)], root)).toBe(false)
+    expect(await verifyInclusion(bytesToHex(la), 1, 2, [bytesToHex(lb)], root)).toBe(false)
+    expect(await verifyInclusion(bytesToHex(la), 2, 2, [bytesToHex(lb)], root)).toBe(false)
+  })
+
+  it('rejects non-32-byte leaf and path elements (splice-forgery regression)', async () => {
+    // Without the width guard, leafHash = LH0 || LH1[:16] with path [LH1[16:]] reconstructs the
+    // honest 2-leaf root from data that is not a leaf of the tree.
+    const la = await merkleLeafHash(enc('a'))
+    const lb = await merkleLeafHash(enc('b'))
+    const root = bytesToHex(await merkleNodeHash(la, lb))
+    const spliced = bytesToHex(la) + bytesToHex(lb).slice(0, 32) // 48 bytes as hex
+    const tail = bytesToHex(lb).slice(32) // remaining 16 bytes as hex
+    expect(await verifyInclusion(spliced, 0, 2, [tail], root)).toBe(false)
+    // Empty leaf with the full concatenation as the single sibling.
+    expect(await verifyInclusion('', 0, 2, [bytesToHex(la) + bytesToHex(lb)], root)).toBe(false)
+    // Oversized path element on an otherwise honest proof.
+    expect(await verifyInclusion(bytesToHex(la), 0, 2, [bytesToHex(lb) + '00'], root)).toBe(false)
+  })
+
+  it('throws loudly on malformed hex instead of coercing to zero bytes', async () => {
+    const la = await merkleLeafHash(enc('a'))
+    const lb = await merkleLeafHash(enc('b'))
+    const root = bytesToHex(await merkleNodeHash(la, lb))
+    const badHex = 'zz'.repeat(32) // right length, non-hex characters
+    await expect(verifyInclusion(badHex, 0, 2, [bytesToHex(lb)], root)).rejects.toThrow(
+      /malformed hex/,
+    )
+    await expect(verifyInclusion(bytesToHex(la), 0, 2, ['gg'.repeat(32)], root)).rejects.toThrow(
+      /malformed hex/,
+    )
   })
 })

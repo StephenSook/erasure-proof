@@ -7,11 +7,13 @@ package demo
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/StephenSook/erasure-proof/services/api/internal/chain"
+	"github.com/StephenSook/erasure-proof/services/api/internal/merkle"
 	"github.com/StephenSook/erasure-proof/services/api/internal/store"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -24,11 +26,14 @@ const (
 	qErasureRecordGet      = "erasure_record_get"
 	qDecisionLogAll        = "decision_log_all"
 	qDecisionLogVerify     = "decision_log_verify"
+	qDecisionLogLeaves     = "decision_log_leaves"
+	qDecisionLogIndexed    = "decision_log_indexed"
 )
 
 // RequiredQueries are the named statements the demo gateway looks up; require them at startup.
 var RequiredQueries = []string{
 	qMemoryPreview, qSubjectKeyFingerprint, qErasureRecordGet, qDecisionLogAll, qDecisionLogVerify,
+	qDecisionLogLeaves, qDecisionLogIndexed,
 }
 
 // ErrNotFound means the requested subject has no memory or erasure record.
@@ -228,4 +233,94 @@ func (s *Service) RbacDemo(ctx context.Context) (RbacResult, error) {
 // Inversion returns the recorded Vec2Text golden run from cryptod.
 func (s *Service) Inversion(ctx context.Context) (map[string]any, error) {
 	return s.inverter.Invert(ctx)
+}
+
+// TreeHead is the RFC 6962 Merkle head over the decision log.
+type TreeHead struct {
+	TreeSize int    `json:"tree_size"`
+	Root     string `json:"root"` // hex
+}
+
+// TreeHead computes the current Merkle root and tree size over the decision-log leaves.
+func (s *Service) TreeHead(ctx context.Context) (TreeHead, error) {
+	leaves, err := s.leaves(ctx)
+	if err != nil {
+		return TreeHead{}, err
+	}
+	return TreeHead{TreeSize: len(leaves), Root: hex.EncodeToString(merkle.Root(leaves))}, nil
+}
+
+// InclusionView is an RFC 6962 audit proof that a decision-log entry is in the tree.
+//
+// leaf_hash, tree_size, and root are convenience echoes, NOT authoritative: a sound verifier
+// recomputes the leaf hash itself from the row's own chain hash (merkle.LeafHash / the browser
+// merkleLeafHash) and checks against the (root, tree_size) signed into the erasure proof, never
+// against values served by the same endpoint that supplied the audit path. This proof is against
+// the CURRENT tree; a proof anchored earlier signed an earlier snapshot (no consistency proof).
+type InclusionView struct {
+	Seq       int64    `json:"seq"`
+	LeafIndex int      `json:"leaf_index"`
+	TreeSize  int      `json:"tree_size"`
+	LeafHash  string   `json:"leaf_hash"`  // hex, RFC 6962 leaf hash of the row's chain hash (convenience echo)
+	AuditPath []string `json:"audit_path"` // hex, leaf-to-root
+	Root      string   `json:"root"`       // hex (current head, not necessarily a signed one)
+}
+
+// Inclusion returns the audit path proving the decision-log row with the given seq is included in
+// the current Merkle tree. ErrNotFound if no row has that seq.
+func (s *Service) Inclusion(ctx context.Context, seq int64) (InclusionView, error) {
+	rows, err := s.operator.Query(ctx, s.q.MustGet(qDecisionLogIndexed))
+	if err != nil {
+		return InclusionView{}, fmt.Errorf("decision log indexed: %w", err)
+	}
+	defer rows.Close()
+	var leaves [][]byte
+	index := -1
+	for rows.Next() {
+		var rowSeq int64
+		var h []byte
+		if err := rows.Scan(&rowSeq, &h); err != nil {
+			return InclusionView{}, fmt.Errorf("scan indexed row: %w", err)
+		}
+		if rowSeq == seq {
+			index = len(leaves)
+		}
+		leaves = append(leaves, h)
+	}
+	if err := rows.Err(); err != nil {
+		return InclusionView{}, err
+	}
+	if index < 0 {
+		return InclusionView{}, ErrNotFound
+	}
+	path := merkle.InclusionProof(leaves, index)
+	auditPath := make([]string, len(path))
+	for i, p := range path {
+		auditPath[i] = hex.EncodeToString(p)
+	}
+	return InclusionView{
+		Seq:       seq,
+		LeafIndex: index,
+		TreeSize:  len(leaves),
+		LeafHash:  hex.EncodeToString(merkle.LeafHash(leaves[index])),
+		AuditPath: auditPath,
+		Root:      hex.EncodeToString(merkle.Root(leaves)),
+	}, nil
+}
+
+func (s *Service) leaves(ctx context.Context) ([][]byte, error) {
+	rows, err := s.operator.Query(ctx, s.q.MustGet(qDecisionLogLeaves))
+	if err != nil {
+		return nil, fmt.Errorf("decision log leaves: %w", err)
+	}
+	defer rows.Close()
+	var leaves [][]byte
+	for rows.Next() {
+		var h []byte
+		if err := rows.Scan(&h); err != nil {
+			return nil, fmt.Errorf("scan leaf: %w", err)
+		}
+		leaves = append(leaves, h)
+	}
+	return leaves, rows.Err()
 }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/StephenSook/erasure-proof/services/api/internal/demo"
@@ -43,6 +44,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/inversion", s.handleDemoInversion)
 	mux.HandleFunc("POST /api/verify-chain", s.handleDemoVerifyChain)
 	mux.HandleFunc("POST /api/rbac-demo", s.handleDemoRbac)
+	mux.HandleFunc("GET /api/tree-head", s.handleDemoTreeHead)
+	mux.HandleFunc("GET /api/inclusion", s.handleDemoInclusion)
 	return mux
 }
 
@@ -245,6 +248,38 @@ func (s *Server) handleDemoRbac(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleDemoTreeHead(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	th, err := s.demo.TreeHead(ctx)
+	if err != nil {
+		log.Printf("httpapi: demo tree-head failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "tree head failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, th)
+}
+
+func (s *Server) handleDemoInclusion(w http.ResponseWriter, r *http.Request) {
+	seq, err := strconv.ParseInt(r.URL.Query().Get("seq"), 10, 64)
+	if err != nil || seq < 1 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "seq must be a positive integer"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	inc, err := s.demo.Inclusion(ctx, seq)
+	switch {
+	case errors.Is(err, demo.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no decision-log entry with that seq"})
+	case err != nil:
+		log.Printf("httpapi: demo inclusion failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "inclusion failed"})
+	default:
+		writeJSON(w, http.StatusOK, inc)
+	}
 }
 
 func (s *Server) handleDemoInversion(w http.ResponseWriter, r *http.Request) {

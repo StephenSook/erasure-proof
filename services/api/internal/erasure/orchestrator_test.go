@@ -13,8 +13,10 @@ import (
 // stubCrypto is an in-memory cryptoclient.Client for testing the post-commit anchoring without a
 // running cryptod.
 type stubCrypto struct {
-	anchorErr error
-	shredErr  error
+	anchorErr    error
+	shredErr     error
+	lastMerkle   string // captured req.MerkleRoot
+	lastTreeSize int
 }
 
 func (s *stubCrypto) Prepare(context.Context, cryptoclient.PrepareRequest) (cryptoclient.PrepareResponse, error) {
@@ -32,6 +34,8 @@ func (s *stubCrypto) Anchor(_ context.Context, req cryptoclient.AnchorRequest) (
 	if s.anchorErr != nil {
 		return cryptoclient.AnchorResponse{}, s.anchorErr
 	}
+	s.lastMerkle = req.MerkleRoot
+	s.lastTreeSize = req.TreeSize
 	return cryptoclient.AnchorResponse{
 		ProofRef:           "s3://proofs/" + req.SubjectHash + ".json",
 		ProofCanonical:     base64.StdEncoding.EncodeToString([]byte(`{"canonical":true}`)),
@@ -42,7 +46,8 @@ func (s *stubCrypto) Anchor(_ context.Context, req cryptoclient.AnchorRequest) (
 
 func TestEraseAndAnchor_RecordsProofRefOnSuccess(t *testing.T) {
 	st, subjectID := setup(t)
-	orch := erasure.NewOrchestrator(st, &stubCrypto{})
+	stub := &stubCrypto{}
+	orch := erasure.NewOrchestrator(st, stub)
 
 	res, proofRef, err := orch.EraseAndAnchor(context.Background(), subjectID, "gdpr_art_17")
 	if err != nil {
@@ -50,6 +55,15 @@ func TestEraseAndAnchor_RecordsProofRefOnSuccess(t *testing.T) {
 	}
 	if res.Seq < 1 || proofRef == "" {
 		t.Fatalf("seq=%d proofRef=%q, want seq>=1 and a proof ref", res.Seq, proofRef)
+	}
+	// The orchestrator computed a real RFC 6962 Merkle head over the decision log and passed it to
+	// anchoring: a 32-byte root (64 hex) and a tree that includes at least this erasure's row. (The
+	// exact size is not asserted: this package's tests share one decision_log.)
+	if len(stub.lastMerkle) != 64 {
+		t.Errorf("merkle root passed to anchor = %q, want 64 hex chars", stub.lastMerkle)
+	}
+	if int64(stub.lastTreeSize) < res.Seq {
+		t.Errorf("tree size %d must include this erasure's seq %d", stub.lastTreeSize, res.Seq)
 	}
 	var stored *string
 	if err := st.Operator.QueryRow(context.Background(),

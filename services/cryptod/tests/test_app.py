@@ -55,11 +55,16 @@ def test_prepare_anchor_verify_flow():
             "wrapped_key_fingerprint": prepared["subject_key_fingerprint"],
             "kms_key_arn": key_arn,
             "key_state": "Enabled",
+            "merkle_root": "ef" * 32,
+            "tree_size": 5,
         },
     ).json()
     assert anchored["signature"]
     assert anchored["proof_ref"].startswith("s3://proofs/")
     assert anchored["object_lock_mode"] == "GOVERNANCE"
+    # The Merkle root and tree size are bound into the signed proof (RFC 6962 transparency log).
+    assert anchored["proof"]["merkle_root"] == "ef" * 32
+    assert anchored["proof"]["tree_size"] == 5
 
     # proof_canonical is the EXACT byte string the signature covers (what a browser-side WebCrypto
     # verifier checks verbatim). Verify the signature over those bytes directly.

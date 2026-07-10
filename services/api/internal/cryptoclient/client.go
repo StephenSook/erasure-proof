@@ -60,6 +60,10 @@ type AnchorRequest struct {
 	WrappedKeyFingerprint string `json:"wrapped_key_fingerprint"`
 	KMSKeyARN             string `json:"kms_key_arn"`
 	KeyState              string `json:"key_state"`
+	// MerkleRoot (hex) and TreeSize describe the RFC 6962 tree over the decision log at anchor time,
+	// signed into the proof so it attests the transparency-log state.
+	MerkleRoot string `json:"merkle_root,omitempty"`
+	TreeSize   int    `json:"tree_size,omitempty"`
 }
 
 // AnchorResponse carries the anchored, signed proof.
