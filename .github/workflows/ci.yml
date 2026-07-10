@@ -79,6 +79,36 @@ jobs:
           CRDB_DSN_TEST: postgresql://root@localhost:26257/erasure_test?sslmode=disable
         run: go test -race ./...
 
+  mcpserver:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/mcpserver
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install
+        run: |
+          uv venv --python 3.12
+          uv pip install -e ".[dev]"
+      - name: Lint (ruff)
+        run: uv run ruff check src tests
+      - name: Types (mypy)
+        run: uv run mypy src
+      - name: Start CockroachDB for the tool tests
+        run: |
+          docker run -d --name crdb-mcp -p 26257:26257 \
+            cockroachdb/cockroach:latest-v25.2 start-single-node --insecure
+          for i in $(seq 1 40); do
+            if docker exec crdb-mcp ./cockroach sql --insecure -e "SELECT 1" >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          docker exec crdb-mcp ./cockroach sql --insecure -e "CREATE DATABASE erasure_test"
+      - name: Tests (gate, chain, and the four tools)
+        env:
+          CRDB_DSN_TEST: postgresql://root@localhost:26257/erasure_test?sslmode=disable
+        run: uv run pytest -q
+
   db-smoke:
     runs-on: ubuntu-latest
     steps:
