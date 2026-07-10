@@ -64,6 +64,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/agent/config", s.handleAgentConfig)
 	mux.HandleFunc("POST /api/agent/forensics", s.handleAgentForensics)
 	mux.HandleFunc("POST /api/agent/memory-writer", s.handleAgentMemoryWriter)
+	mux.HandleFunc("POST /api/embedding/titan", s.handleTitanEmbed)
 	return mux
 }
 
@@ -499,6 +500,41 @@ func (s *Server) handleAgentConfig(w http.ResponseWriter, r *http.Request) {
 		"live_available":          forensics,
 		"forensics_available":     forensics,
 		"memory_writer_available": memWriter,
+		"titan_available":         s.demo.TitanAvailable(),
+	})
+}
+
+func (s *Server) handleTitanEmbed(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil || strings.TrimSpace(req.Text) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "text is required"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	emb, err := s.demo.TitanEmbed(ctx, req.Text)
+	if errors.Is(err, demo.ErrTitanUnavailable) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "titan embedding not wired"})
+		return
+	}
+	if errors.Is(err, demo.ErrForensicsBusy) || errors.Is(err, demo.ErrForensicsBudget) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "the agent is busy or over budget; try again shortly"})
+		return
+	}
+	if err != nil {
+		log.Printf("httpapi: titan embed failed: %v", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "titan embedding failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"source":            "live_bedrock_titan",
+		"model_id":          emb.ModelID,
+		"dimensions":        emb.Dimensions,
+		"embedding_b64":     emb.EmbeddingB64,
+		"sha256":            emb.Sha256,
+		"input_token_count": emb.TokenCount,
 	})
 }
 

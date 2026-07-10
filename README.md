@@ -114,6 +114,12 @@ Earned feedback on all four tools: [docs/feedback-cockroachdb-tools.md](docs/fee
 - **Amazon Bedrock (Claude)**: the memory-writer agent distils durable facts via real inference;
   the forensics agent proves an erasure through the four read-only tools and returns a verdict
   with its trace.
+- **Amazon Bedrock (Titan v2)**: the console's side-by-side panel embeds the same memory sentence
+  with AWS-native Titan (1024-dim) next to the invertible GTR vector. Stated honestly on the
+  panel itself: Titan has no public inverter today, and that absence is not proof of
+  irreversibility, which is why erasure destroys the key rather than trusting model obscurity.
+  The protected, invertibility-demonstrating vector remains GTR (Vec2Text only inverts models it
+  was trained on).
 - **Amazon ECS / Fargate**: the always-on, connection-pooled erasure path (Lambda plus a SQL
   database exhausts connections; the deploy stack is `deploy/aws/`).
 

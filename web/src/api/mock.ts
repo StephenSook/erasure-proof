@@ -22,6 +22,7 @@ import {
   type ProofView,
   type RbacResult,
   type StreamHandlers,
+  type TitanEmbedding,
   type TreeHead,
 } from './types'
 
@@ -162,7 +163,17 @@ export function createMockClient(): DemoApi {
     async getAgentConfig(): Promise<AgentConfig> {
       // The mock has no Bedrock; advertise the live agent as unavailable so the UI shows the
       // recorded verdict. A real deploy with AGENTS_LIVE=1 flips this to true.
-      return { live_available: false, forensics_available: false, memory_writer_available: false }
+      return {
+        live_available: false,
+        forensics_available: false,
+        memory_writer_available: false,
+        titan_available: false,
+      }
+    },
+    async titanEmbed(): Promise<TitanEmbedding> {
+      // No Bedrock in the mock, and a fabricated vector would defeat the panel's whole point
+      // (an honest AWS-native comparison), so the mock refuses like the unwired server does.
+      throw new ApiError(503, 'titan embedding not wired')
     },
     async writeMemory(turn: string): Promise<MemoryWriterResult> {
       // No Bedrock in the mock: distil to the first sentence (deterministic), store a real mock

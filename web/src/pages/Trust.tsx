@@ -29,6 +29,11 @@ const tiers: { cap: string; status: string; note: string }[] = [
     status: 'Local cluster',
     note: 'Real Raft on a local 3-node cluster; managed cloud nodes cannot be killed. Recorded and labeled.',
   },
+  {
+    cap: 'Titan v2 side-by-side embedding',
+    status: 'Wired live (deploy)',
+    note: 'Live Bedrock call on the deployed console. Titan has no public inverter today; the panel states that this is an accident of tooling, not a safety guarantee.',
+  },
 ]
 
 export function Trust() {

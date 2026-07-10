@@ -84,6 +84,10 @@ type Service struct {
 	forensicsSem       chan struct{}
 	forensicsMu        sync.Mutex
 	forensicsHits      []time.Time
+	// titanEmbedder is the live AWS-native (Titan v2) embedding for the side-by-side panel; nil
+	// when Bedrock is not wired. It shares the agent semaphore and rolling-hour budget: one
+	// account-level Bedrock quota, one guard.
+	titanEmbedder agent.TitanEmbedder
 }
 
 // New builds the demo Service.
@@ -102,6 +106,38 @@ func New(s *store.Store, inverter Inverter) *Service {
 // SetForensicsConverser wires the live Bedrock forensics agent. Called at boot only when Bedrock is
 // configured; leaving it unset keeps the live agent unavailable (the UI falls back honestly).
 func (s *Service) SetForensicsConverser(c agent.Converser) { s.forensicsConverser = c }
+
+// SetTitanEmbedder wires the live Titan v2 side-by-side embedding. Boot-time, AGENTS_LIVE only.
+func (s *Service) SetTitanEmbedder(t agent.TitanEmbedder) { s.titanEmbedder = t }
+
+// TitanAvailable reports whether the live Titan embedding can run (drives the UI panel).
+func (s *Service) TitanAvailable() bool { return s.titanEmbedder != nil }
+
+// ErrTitanUnavailable means no Bedrock Titan embedder is wired.
+var ErrTitanUnavailable = errors.New("titan embedding unavailable")
+
+// TitanEmbed embeds text with AWS-native Titan v2 for the side-by-side panel. Shares the agent
+// semaphore (one live Bedrock call at a time) and the rolling-hour budget with the forensics
+// agent and memory-writer, since all draw on the same low new-account Bedrock quota.
+func (s *Service) TitanEmbed(ctx context.Context, text string) (agent.TitanEmbedding, error) {
+	if s.titanEmbedder == nil {
+		return agent.TitanEmbedding{}, ErrTitanUnavailable
+	}
+	select {
+	case s.forensicsSem <- struct{}{}:
+		defer func() { <-s.forensicsSem }()
+	default:
+		return agent.TitanEmbedding{}, ErrForensicsBusy
+	}
+	if !s.allowForensics() {
+		return agent.TitanEmbedding{}, ErrForensicsBudget
+	}
+	// Same bound as the memory-writer: an oversized input should fail here, not opaquely at AWS.
+	if len(text) > 1000 {
+		text = text[:1000]
+	}
+	return s.titanEmbedder.EmbedText(ctx, text)
+}
 
 // ForensicsAvailable reports whether the live agent can run (drives the UI button).
 func (s *Service) ForensicsAvailable() bool { return s.forensicsConverser != nil }
