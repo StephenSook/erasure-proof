@@ -62,10 +62,11 @@ export function DemoConsole() {
     }
   }, [])
 
-  // Probe once whether the live GPU worker is wired, so the live-inversion button appears only
-  // when it can actually run (a deploy without MODAL_INVERT_* shows the recorded path only).
+  // Probe once whether the live GPU worker and the live Bedrock agent are wired, so each live
+  // control reflects reality (a deploy without MODAL_INVERT_* / AGENTS_LIVE shows the recorded path).
   useEffect(() => {
     void actions.checkLive()
+    void actions.checkAgent()
   }, [actions])
 
   // On each stage completing, flare its bar, stagger its results in, and scramble-in any value
@@ -335,9 +336,79 @@ export function DemoConsole() {
               GDPR Article 17 erases the personal data; EU AI Act Article 19 keeps the decision log.
               Both hold, from one transaction.
             </div>
+            {forensicsAgentPanel()}
           </>
         )
     }
+  }
+
+  function forensicsAgentPanel() {
+    const audit = state.agentAudit
+    // Tone on the SERVER'S read of the evidence, never the model's free text. If the model's wording
+    // and the evidence disagree, the evidence is authoritative and we say so.
+    const provenByEvidence = audit?.evidence_proven === true
+    const provenByText = audit?.verdict?.startsWith('VERDICT: PROVEN') ?? false
+    const disagree = audit != null && provenByText !== provenByEvidence
+    return (
+      <div className="live-leak">
+        <div className="live-leak__head">
+          <Badge kind={state.agentAvailable ? 'live' : 'recorded'}>
+            {state.agentAvailable ? 'Live AI agent' : 'Recorded verdict'}
+          </Badge>
+          <button
+            className="btn btn--small"
+            onClick={() => void actions.runForensics()}
+            disabled={state.agentStatus === 'running' || !state.subjectId}
+          >
+            {state.agentStatus === 'running'
+              ? 'The agent is gathering evidence...'
+              : 'Have the AI agent prove the erasure'}
+          </button>
+        </div>
+        {state.agentStatus === 'running' && state.agentAvailable && (
+          <div className="note">
+            Claude is calling the read-only forensic tools, one at a time, to decide whether the
+            erasure is provable. It can only cite what the tools return.
+          </div>
+        )}
+        {state.agentError && <div className="note note--error">{state.agentError}</div>}
+        {audit && state.agentStatus === 'done' && (
+          <>
+            <KeyValue
+              items={[
+                { k: 'verdict', v: String(audit.verdict ?? ''), tone: provenByEvidence ? 'ok' : 'bad' },
+                { k: 'evidence proves erasure', v: provenByEvidence ? 'yes' : 'no', tone: provenByEvidence ? 'ok' : 'bad' },
+                { k: 'source', v: audit.source === 'live_bedrock' ? 'live Claude on Bedrock' : 'recorded (agent not wired)', tone: audit.source === 'live_bedrock' ? 'ok' : undefined },
+                { k: 'rounds', v: String(audit.rounds ?? '') },
+              ]}
+            />
+            {disagree && (
+              <div className="note note--error">
+                The agent&apos;s wording and the tool evidence disagree. The evidence is
+                authoritative: this erasure is {provenByEvidence ? 'proven' : 'NOT proven'} by what
+                the read-only tools returned.
+              </div>
+            )}
+            {audit.tool_calls && audit.tool_calls.length > 0 && (
+              <div className="agent-trace">
+                {audit.tool_calls.map((c, i) => (
+                  <div className="agent-trace__row" key={`${c.name}-${i}`}>
+                    <div className="agent-trace__tool">
+                      {c.name}({JSON.stringify(c.input)})
+                    </div>
+                    <CodeBlock>{JSON.stringify(c.output)}</CodeBlock>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="note">
+              {String(audit.disclosure ?? '')} The verdict is toned by our own check of the trace,
+              not the model&apos;s wording; the trace above is the agent&apos;s actual evidence.
+            </div>
+          </>
+        )}
+      </div>
+    )
   }
 
   return (

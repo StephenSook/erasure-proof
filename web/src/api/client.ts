@@ -2,11 +2,13 @@
 // proxied to the local Go api in dev). Override the base with VITE_API_BASE if the api is elsewhere.
 
 import {
+  type AgentConfig,
   ApiError,
   type ChainResult,
   type DecisionRow,
   type DemoApi,
   type EraseResponse,
+  type ForensicsAudit,
   type IngestResult,
   type InversionConfig,
   type InversionGoldenRun,
@@ -65,6 +67,12 @@ export function createHttpClient(base = ''): DemoApi {
     },
     liveInversion(embeddingB64) {
       return request<LiveInversion>(b, 'POST', '/api/inversion/live', { embedding: embeddingB64 })
+    },
+    getAgentConfig() {
+      return request<AgentConfig>(b, 'GET', '/api/agent/config')
+    },
+    forensicsAudit(subjectId) {
+      return request<ForensicsAudit>(b, 'POST', '/api/agent/forensics', { subject_id: subjectId })
     },
     erase(subjectId, lawfulBasis = 'gdpr_art_17') {
       return request<EraseResponse>(b, 'POST', '/erase', {

@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/StephenSook/erasure-proof/services/api/internal/agent"
 	"github.com/StephenSook/erasure-proof/services/api/internal/config"
 	"github.com/StephenSook/erasure-proof/services/api/internal/cryptoclient"
 	"github.com/StephenSook/erasure-proof/services/api/internal/demo"
@@ -52,6 +53,20 @@ func main() {
 	orch := erasure.NewOrchestrator(st, crypto)
 	ingester := ingest.New(st, crypto)
 	demoSvc := demo.New(st, crypto)
+
+	// Wire the live Bedrock forensics agent only when explicitly enabled (AGENTS_LIVE=1), so local
+	// and dev runs never reach for AWS credentials. Set it at the judge-facing deploy once the
+	// Bedrock token quota is granted; until then the console shows the honest recorded verdict.
+	if os.Getenv("AGENTS_LIVE") == "1" {
+		converser, cErr := agent.NewBedrockConverse(startCtx)
+		if cErr != nil {
+			log.Printf("warning: AGENTS_LIVE=1 but Bedrock client init failed, live agent disabled: %v", cErr)
+		} else {
+			demoSvc.SetForensicsConverser(converser)
+			log.Print("live Bedrock forensics agent enabled")
+		}
+	}
+
 	srv := httpapi.New(st, orch, ingester, demoSvc, os.Getenv("GIT_SHA"))
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,

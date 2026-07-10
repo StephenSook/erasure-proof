@@ -4,11 +4,13 @@
 // so tests never share state.
 
 import {
+  type AgentConfig,
   ApiError,
   type ChainResult,
   type DecisionRow,
   type DemoApi,
   type EraseResponse,
+  type ForensicsAudit,
   type InversionConfig,
   type InversionGoldenRun,
   type LiveInversion,
@@ -126,6 +128,35 @@ export function createMockClient(): DemoApi {
         input_sha256: inputSha,
         fell_back: true,
         fallback_reason: 'mock has no GPU worker',
+      }
+    },
+    async getAgentConfig(): Promise<AgentConfig> {
+      // The mock has no Bedrock; advertise the live agent as unavailable so the UI shows the
+      // recorded verdict. A real deploy with AGENTS_LIVE=1 flips this to true.
+      return { live_available: false }
+    },
+    async forensicsAudit(): Promise<ForensicsAudit> {
+      // No Bedrock in the mock: return an honestly-labeled recorded verdict whose trace reflects
+      // the REAL mock state (key gone + erasure recorded only after erase ran), so the UI path is
+      // exercised without fabricating a live agent.
+      const destroyed = erased
+      return {
+        source: 'recorded',
+        disclosure:
+          'Recorded verdict (the mock has no Bedrock). With AGENTS_LIVE=1 the real Claude agent runs live and returns this with its own reasoning.',
+        rounds: 2,
+        evidence_proven: destroyed,
+        verdict: destroyed
+          ? 'VERDICT: PROVEN the subject key row is gone, the erasure is recorded, and the decision-log hash chain is intact.'
+          : 'VERDICT: NOT PROVEN the subject still has its key row; no erasure has been recorded yet.',
+        tool_calls: [
+          {
+            name: 'confirm_key_destroyed',
+            input: { subject_id: subjectId },
+            output: { key_row_present: !destroyed, erasure_recorded: destroyed, destroyed },
+          },
+          { name: 'verify_hash_chain', input: {}, output: { intact: true, checked: destroyed ? 2 : 1 } },
+        ],
       }
     },
     async erase() {

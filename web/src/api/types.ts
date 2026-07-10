@@ -113,12 +113,39 @@ export class ApiError extends Error {
   }
 }
 
+// AgentConfig tells the UI whether the live Bedrock forensics agent is wired.
+export interface AgentConfig {
+  live_available: boolean
+}
+
+// AgentToolCall is one recorded tool invocation in the agent's evidence trace.
+export interface AgentToolCall {
+  name: string
+  input: Record<string, unknown>
+  output: Record<string, unknown>
+}
+
+// ForensicsAudit is the agent's verdict plus its full tool-call trace. source is "live_bedrock"
+// when the real agent ran, or "recorded" for the honest mock fallback.
+export interface ForensicsAudit {
+  verdict: string
+  tool_calls: AgentToolCall[] | null
+  rounds: number
+  source?: string
+  disclosure?: string
+  // The server's own read of the tool trace (NOT the model's text), so the UI tones the verdict on
+  // evidence and flags any case where the model's wording disagrees with what the tools returned.
+  evidence_proven: boolean
+}
+
 export interface DemoApi {
   ingest(contentB64: string, embeddingB64: string): Promise<IngestResult>
   getMemory(subjectId: string): Promise<MemoryView>
   getInversion(): Promise<InversionGoldenRun>
   getInversionConfig(): Promise<InversionConfig>
   liveInversion(embeddingB64: string): Promise<LiveInversion>
+  getAgentConfig(): Promise<AgentConfig>
+  forensicsAudit(subjectId: string): Promise<ForensicsAudit>
   erase(subjectId: string, lawfulBasis?: string): Promise<EraseResponse>
   getProof(subjectId: string): Promise<ProofView>
   getDecisionLog(): Promise<DecisionRow[]>

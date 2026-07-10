@@ -368,6 +368,16 @@ func TestInversionLive_ValidatesLengthAndProxies(t *testing.T) {
 	}
 }
 
+func TestForensicsAgent_UnavailableWithoutConverser(t *testing.T) {
+	svc := demo.New(&store.Store{}, stubInverter{})
+	if svc.ForensicsAvailable() {
+		t.Error("forensics agent should be unavailable until a converser is wired")
+	}
+	if _, err := svc.ForensicsAudit(context.Background(), "s1"); !errors.Is(err, demo.ErrForensicsUnavailable) {
+		t.Errorf("want ErrForensicsUnavailable, got %v", err)
+	}
+}
+
 func TestInversionLive_HourlyBudgetGuard(t *testing.T) {
 	svc := demo.New(&store.Store{}, stubInverter{})
 	// Freeze the clock so the rolling window is deterministic.
