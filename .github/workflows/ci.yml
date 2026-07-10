@@ -1,0 +1,74 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: AI-tone (no em-dashes in tracked text)
+        run: |
+          # match the em-dash by its UTF-8 bytes so this file stays em-dash-free itself
+          if git grep -nI $'\xe2\x80\x94' -- ':!LICENSE' ':!*.svg'; then
+            echo "::error::em-dash found; replace per the AI-tone rule"
+            exit 1
+          fi
+          echo "ai-tone clean"
+      - name: Secret scan (gitleaks, full history)
+        # Run the binary directly (no GitHub API, no PR-comment permissions) so it works on a
+        # private repo with the default read-only token. `detect` scans the full git history.
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/gitleaks/gitleaks:latest \
+            detect --redact --no-banner
+
+  db-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start single-node CockroachDB
+        # A services: block cannot pass the required start command to the cockroach image,
+        # so we start it as a step and poll readiness.
+        run: |
+          docker run -d --name crdb -p 26257:26257 -p 8080:8080 \
+            cockroachdb/cockroach:latest-v25.2 start-single-node --insecure
+          for i in $(seq 1 40); do
+            if docker exec crdb ./cockroach sql --insecure -e "SELECT 1" >/dev/null 2>&1; then
+              echo "crdb ready"; break
+            fi
+            sleep 2
+          done
+      - name: Apply migrations (schema is valid CockroachDB SQL)
+        run: |
+          docker exec crdb ./cockroach sql --insecure -e "CREATE DATABASE erasure"
+          for f in db/migrations/0001_schema.sql db/migrations/0002_roles.sql db/migrations/0003_vector_index.sql; do
+            echo "== applying $f =="
+            docker exec -i crdb ./cockroach sql --insecure -d erasure < "$f"
+          done
+      - name: Append-only decision log holds against agent_worker
+        run: |
+          # As agent_worker: INSERT must succeed (append), UPDATE and DELETE must be denied.
+          # Byte literals (x'..') avoid sha256() which returns a hex string, not BYTES.
+          echo "-- agent_worker INSERT should succeed --"
+          docker exec -i crdb ./cockroach sql --insecure -d erasure -u agent_worker <<'SQL'
+          INSERT INTO decision_log (seq, subject_hash, action, lawful_basis, prev_hash, hash)
+            VALUES (1, x'0011', 'ingest', 'gdpr_art_17', x'00', x'0022');
+          SQL
+          for op in "UPDATE decision_log SET action = 'tamper' WHERE seq = 1" \
+                    "DELETE FROM decision_log WHERE seq = 1"; do
+            echo "-- expect a permission error: $op --"
+            if docker exec -i crdb ./cockroach sql --insecure -d erasure -u agent_worker \
+                -e "$op" 2>&1 | tee /tmp/o | grep -qi "permission\|denied\|does not have"; then
+              echo "correctly denied to agent_worker"
+            else
+              echo "::error::agent_worker was able to run: $op"; cat /tmp/o; exit 1
+            fi
+          done
