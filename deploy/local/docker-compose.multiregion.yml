@@ -1,0 +1,69 @@
+# Local 3-node, 3-REGION CockroachDB cluster. Exists ONLY to verify the optional
+# REGIONAL BY ROW migration (db/migrations/optional/0006_regional_by_row.sql) on a cluster
+# that actually has distinct region localities; the judge-facing Basic tier is single-region
+# and never runs that migration. Run via deploy/local/rbr-verify.sh, not by hand.
+#
+# Distinct container names, volumes, and host port from docker-compose.yml so both rigs can
+# coexist (this one exposes SQL on 26261).
+
+x-crdb-image: &crdb_image ${CRDB_IMAGE:-cockroachdb/cockroach:v25.2.3}
+
+services:
+  roachmr1:
+    image: *crdb_image
+    container_name: roachmr1
+    hostname: roachmr1
+    command: start --insecure --join=roachmr1,roachmr2,roachmr3 --listen-addr=0.0.0.0:26257 --http-addr=0.0.0.0:8080 --advertise-addr=roachmr1 --locality=region=us-east-1,zone=a
+    volumes:
+      - roachmr1-data:/cockroach/cockroach-data
+    ports:
+      - "26261:26257"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  roachmr2:
+    image: *crdb_image
+    container_name: roachmr2
+    hostname: roachmr2
+    command: start --insecure --join=roachmr1,roachmr2,roachmr3 --listen-addr=0.0.0.0:26257 --http-addr=0.0.0.0:8080 --advertise-addr=roachmr2 --locality=region=eu-west-1,zone=a
+    volumes:
+      - roachmr2-data:/cockroach/cockroach-data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  roachmr3:
+    image: *crdb_image
+    container_name: roachmr3
+    hostname: roachmr3
+    command: start --insecure --join=roachmr1,roachmr2,roachmr3 --listen-addr=0.0.0.0:26257 --http-addr=0.0.0.0:8080 --advertise-addr=roachmr3 --locality=region=ap-southeast-2,zone=a
+    volumes:
+      - roachmr3-data:/cockroach/cockroach-data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  init:
+    image: *crdb_image
+    container_name: roachmr-init
+    command: init --insecure --host=roachmr1
+    depends_on:
+      roachmr1:
+        condition: service_healthy
+      roachmr2:
+        condition: service_healthy
+      roachmr3:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  roachmr1-data:
+  roachmr2-data:
+  roachmr3-data:

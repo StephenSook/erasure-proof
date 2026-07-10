@@ -81,3 +81,23 @@ node-kill beat, `inject_retry_errors_enabled` tests, tier-gate-free C-SPANN, and
 tests. The managed cloud cluster is the judge-facing system of record and the only home of the
 Managed MCP Server, the ccloud RBAC boundary, and the funded-warm cluster through judging. We
 never kill the cloud cluster's nodes and never point destructive tests at it.
+
+## Multi-region (prepared, deliberately not enabled)
+
+`db/migrations/optional/0006_regional_by_row.sql` converts the personal-data tables
+(agent_memory, subject_keys) to REGIONAL BY ROW, so a subject's encrypted memory and wrapped
+key are domiciled in a chosen region, and the pseudonymized compliance artifacts (decision_log,
+erasure_record) to GLOBAL, readable fast from every region. It lives outside the default
+migration glob because it requires region localities the deployed demo does not have: the
+judge-facing cluster is CockroachDB Cloud Basic, which is single-region.
+
+`deploy/local/rbr-verify.sh` is the evidence the migration is real: it spins up a 3-region
+local cluster (us-east-1, eu-west-1, ap-southeast-2), applies the default migrations plus the
+optional one, and asserts the database regions, per-row domiciling via an explicit crdb_region,
+RLS surviving the locality conversion, and C-SPANN vector search still answering on the
+converted table (v25.2.3: the conversion rebuilds the vector index, with writes paused during
+the rebuild).
+
+Honest scope: the deployed demo runs single-region, and we make no multi-region claim for it.
+The migration exists so an operator with a multi-region cluster can turn on geo-domiciling
+without schema redesign.
