@@ -46,7 +46,7 @@ for i in $(seq 1 40); do
   sleep 1
 done
 docker exec "$CONTAINER" ./cockroach sql --insecure -e "CREATE DATABASE IF NOT EXISTS erasure" >/dev/null
-for f in db/migrations/0001_schema.sql db/migrations/0002_roles.sql db/migrations/0003_vector_index.sql; do
+for f in db/migrations/0*.sql; do
   echo "   applying $f"
   docker exec -i "$CONTAINER" ./cockroach sql --insecure -d erasure < "$f" >/dev/null
 done

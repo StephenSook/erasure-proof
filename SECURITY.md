@@ -40,6 +40,11 @@ defend, and every limitation is stated proactively.
 - The agent role cannot read or destroy keys (no grants on `subject_keys`) and cannot rewrite the
   decision log. The operator role can erase but cannot rewrite history. The forensics role is
   SELECT-only.
+- Row-level security scopes the agent role to ONE subject per session (`SET app.subject_id`,
+  fail-closed when unset: an undeclared session sees no rows and cross-subject writes are denied).
+  Honest scope: RLS binds the agent to the subject its session DECLARES; the application layer
+  chooses that value, so this contains cross-subject blast radius rather than authenticating
+  subjects. The owner/admin bypass and the RLS-vs-CDC incompatibility above apply.
 - AWS: three separated principals (KMS/erasure, S3-write, Bedrock) with `aws:SourceArn` /
   `aws:SourceAccount` confused-deputy conditions, and a KMS key policy that requires the
   `subject_id` encryption context so a call without it is denied. No single principal holds both
