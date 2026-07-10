@@ -417,6 +417,23 @@ button {
   font-size: 12px;
 }
 
+/* Forensics-agent evidence trace: each tool call and its raw JSON output. */
+.agent-trace {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.agent-trace__row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.agent-trace__tool {
+  font-family: var(--font-mono, monospace);
+  font-size: 11.5px;
+  color: color-mix(in srgb, var(--hue) 70%, var(--fg-1));
+}
+
 /* LCD instrument strip (DSEG faces; the ghost span is the unlit segments underlay) */
 .lcd-strip {
   display: flex;

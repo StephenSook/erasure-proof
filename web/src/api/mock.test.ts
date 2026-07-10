@@ -56,4 +56,22 @@ describe('mock client', () => {
     expect(live.fell_back).toBe(true)
     expect(live.input_sha256).toMatch(/^[0-9a-f]{64}$/)
   })
+
+  it('forensics agent verdict reflects real erasure state, labeled as recorded', async () => {
+    const api = createMockClient()
+    expect((await api.getAgentConfig()).live_available).toBe(false)
+    await api.ingest('c', 'e')
+
+    // Before erasure: NOT PROVEN, and the tool trace shows the key row still present.
+    const before = await api.forensicsAudit('any')
+    expect(before.source).toBe('recorded')
+    expect(before.verdict).toMatch(/NOT PROVEN/)
+    expect(before.tool_calls?.[0].output.destroyed).toBe(false)
+
+    // After erasure: PROVEN, trace shows destroyed + erasure recorded.
+    await api.erase('x')
+    const after = await api.forensicsAudit('any')
+    expect(after.verdict).toMatch(/PROVEN/)
+    expect(after.tool_calls?.[0].output.destroyed).toBe(true)
+  })
 })

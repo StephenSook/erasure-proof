@@ -4,6 +4,7 @@ import {
   type DecisionRow,
   type DemoApi,
   type EraseResponse,
+  type ForensicsAudit,
   getClient,
   type InversionGoldenRun,
   type LiveInversion,
@@ -24,6 +25,11 @@ export interface DemoState {
   liveStatus: 'idle' | 'running' | 'done' | 'error'
   liveError?: string
   liveAvailable?: boolean
+  // Live Bedrock forensics agent: the AI proves the erasure on screen.
+  agentAudit?: ForensicsAudit
+  agentStatus: 'idle' | 'running' | 'done' | 'error'
+  agentError?: string
+  agentAvailable?: boolean
   erase?: EraseResponse
   proof?: ProofView
   decisionLog?: DecisionRow[]
@@ -46,6 +52,7 @@ const zeroSeq = (): Record<StageId, number> =>
 const initialState = (): DemoState => ({
   subjectId: '',
   liveStatus: 'idle',
+  agentStatus: 'idle',
   status: idleStatus(),
   error: {},
   doneSeq: zeroSeq(),
@@ -138,6 +145,37 @@ export function useDemo(injected?: DemoApi) {
     }
   }, [])
 
+  // Probe whether the live Bedrock forensics agent is wired.
+  const checkAgent = useCallback(async () => {
+    try {
+      const cfg = await clientRef.current!.getAgentConfig()
+      setState((s) => ({ ...s, agentAvailable: cfg.live_available }))
+    } catch {
+      setState((s) => ({ ...s, agentAvailable: false }))
+    }
+  }, [])
+
+  // Have the AI agent prove the erasure: a Claude tool-use loop over the read-only tools, returning
+  // a verdict with its evidence trace. Mock mode returns an honestly-labeled recorded verdict.
+  const runForensics = useCallback(async () => {
+    const id = subjectRef.current
+    if (!id) {
+      setState((s) => ({ ...s, agentStatus: 'error', agentError: 'Run stage 1 (store a memory) first.' }))
+      return
+    }
+    setState((s) => ({ ...s, agentStatus: 'running', agentError: undefined }))
+    try {
+      const audit = await clientRef.current!.forensicsAudit(id)
+      setState((s) => ({ ...s, agentAudit: audit, agentStatus: 'done' }))
+    } catch (e) {
+      setState((s) => ({
+        ...s,
+        agentStatus: 'error',
+        agentError: e instanceof Error ? e.message : String(e),
+      }))
+    }
+  }, [])
+
   const runEnvelope = useCallback(
     () => step('envelope', async (c) => ({ memory: await c.getMemory(requireSubject()) })),
     [step, requireSubject],
@@ -196,6 +234,8 @@ export function useDemo(injected?: DemoApi) {
       runLeak,
       checkLive,
       runLiveLeak,
+      checkAgent,
+      runForensics,
       runEnvelope,
       runErase,
       runDurability,
@@ -208,6 +248,8 @@ export function useDemo(injected?: DemoApi) {
       runLeak,
       checkLive,
       runLiveLeak,
+      checkAgent,
+      runForensics,
       runEnvelope,
       runErase,
       runDurability,
