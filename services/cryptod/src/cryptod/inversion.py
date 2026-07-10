@@ -69,7 +69,9 @@ def live_inversion(
     modal_secret: str,
     num_steps: int = 50,
     sequence_beam_width: int = 8,
-    timeout_s: float = 280.0,
+    # Longer than the Modal worker's own 300s timeout, so cryptod waits out the worker's result
+    # (success or the worker's own timeout error) rather than abandoning live GPU work it billed.
+    timeout_s: float = 320.0,
 ) -> dict:
     """Invert an embedding on the Modal T4 GPU worker (services/inversion-worker/modal_invert.py).
 

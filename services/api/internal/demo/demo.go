@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/StephenSook/erasure-proof/services/api/internal/chain"
@@ -51,15 +52,27 @@ type Inverter interface {
 	InvertConfig(ctx context.Context) (map[string]any, error)
 }
 
+// liveInvertMaxPerHour caps how many live GPU inversions this process will start per rolling hour,
+// so sustained demand or abuse cannot drain the GPU credit pool: at ~$0.02/run this bounds spend to
+// roughly $1.20/hour even if a caller keeps clicking. It complements the concurrency semaphore
+// (which bounds INSTANTANEOUS spend) and the worker's own max_containers cap.
+const liveInvertMaxPerHour = 60
+
 // Service holds the read pools and the inversion proxy.
 type Service struct {
 	operator *pgxpool.Pool
 	agent    *pgxpool.Pool
 	q        store.Queries
 	inverter Inverter
-	// liveInvertSem bounds concurrent live GPU inversions so demand (or abuse) cannot fan out
+	// liveInvertSem bounds CONCURRENT live GPU inversions so demand (or abuse) cannot fan out
 	// unbounded GPU spend; excess callers get a busy signal rather than another billed container.
 	liveInvertSem chan struct{}
+	// liveInvertMu guards liveInvertHits, the timestamps of recent live inversions used for the
+	// rolling-hour rate limit.
+	liveInvertMu   sync.Mutex
+	liveInvertHits []time.Time
+	// now is injectable so the rate-limit test does not depend on wall-clock time.
+	now func() time.Time
 }
 
 // New builds the demo Service.
@@ -70,7 +83,32 @@ func New(s *store.Store, inverter Inverter) *Service {
 		q:             s.Q,
 		inverter:      inverter,
 		liveInvertSem: make(chan struct{}, 2),
+		now:           time.Now,
 	}
+}
+
+// allowLiveInvert records a live-inversion attempt and reports whether it is within the rolling
+// hourly budget. It prunes timestamps older than an hour on each call.
+func (s *Service) allowLiveInvert() bool {
+	s.liveInvertMu.Lock()
+	defer s.liveInvertMu.Unlock()
+	nowFn := s.now
+	if nowFn == nil {
+		nowFn = time.Now
+	}
+	cutoff := nowFn().Add(-time.Hour)
+	kept := s.liveInvertHits[:0]
+	for _, t := range s.liveInvertHits {
+		if t.After(cutoff) {
+			kept = append(kept, t)
+		}
+	}
+	s.liveInvertHits = kept
+	if len(s.liveInvertHits) >= liveInvertMaxPerHour {
+		return false
+	}
+	s.liveInvertHits = append(s.liveInvertHits, nowFn())
+	return true
 }
 
 // MemoryView is a non-sensitive preview of a subject's stored memory.
@@ -251,6 +289,9 @@ func (s *Service) Inversion(ctx context.Context) (map[string]any, error) {
 // ErrLiveInversionBusy signals that all live-inversion slots are in use (cost guard).
 var ErrLiveInversionBusy = errors.New("live inversion busy")
 
+// ErrLiveInversionBudget signals the rolling-hour live-inversion budget is exhausted (cost guard).
+var ErrLiveInversionBudget = errors.New("live inversion hourly budget exhausted")
+
 // InversionConfig reports whether live GPU inversion is available (drives the UI button).
 func (s *Service) InversionConfig(ctx context.Context) (map[string]any, error) {
 	return s.inverter.InvertConfig(ctx)
@@ -268,11 +309,17 @@ func (s *Service) InversionLive(ctx context.Context, embeddingB64 string) (map[s
 	if len(raw) != 768*4 {
 		return nil, fmt.Errorf("embedding must be 3072 bytes (768 float32), got %d", len(raw))
 	}
+	// Rolling-hour budget first (bounds sustained spend), then the concurrency slot (bounds
+	// instantaneous spend). Only count a run against the budget once it also gets a slot, so a
+	// burst of busy-rejections does not consume the hourly allowance.
 	select {
 	case s.liveInvertSem <- struct{}{}:
 		defer func() { <-s.liveInvertSem }()
 	default:
 		return nil, ErrLiveInversionBusy
+	}
+	if !s.allowLiveInvert() {
+		return nil, ErrLiveInversionBudget
 	}
 	return s.inverter.InvertLive(ctx, embeddingB64)
 }

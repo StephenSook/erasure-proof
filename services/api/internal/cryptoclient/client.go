@@ -92,11 +92,21 @@ type Client interface {
 type HTTP struct {
 	base string
 	http *http.Client
+	// liveHTTP is used only for live GPU inversion, which legitimately takes ~1-2.5 minutes
+	// (cold start + the model run). Its absolute timeout is deliberately LONGER than cryptod's
+	// worker call (320s) and Modal's own worker timeout (300s), so the innermost layer finishes
+	// first and no layer abandons live GPU work it already triggered and billed. The 30s client
+	// stays the safety net for every other cryptod call.
+	liveHTTP *http.Client
 }
 
 // NewHTTP builds an HTTP client for the cryptod base URL.
 func NewHTTP(baseURL string) *HTTP {
-	return &HTTP{base: baseURL, http: &http.Client{Timeout: 30 * time.Second}}
+	return &HTTP{
+		base:     baseURL,
+		http:     &http.Client{Timeout: 30 * time.Second},
+		liveHTTP: &http.Client{Timeout: 330 * time.Second},
+	}
 }
 
 func (c *HTTP) post(ctx context.Context, path string, in, out any) error {
@@ -152,12 +162,13 @@ func (c *HTTP) Invert(ctx context.Context) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c.doInvert(req)
+	return c.doInvert(c.http, req)
 }
 
 // InvertLive runs live GPU inversion of the given embedding via cryptod POST /invert/live. cryptod
 // itself falls back to the recorded run if the GPU worker is unconfigured or unreachable, so a
 // non-error response may carry source="recorded_golden_run"; the caller reads the source label.
+// It uses liveHTTP (330s) so the long GPU run is not cut off by the 30s general client.
 func (c *HTTP) InvertLive(ctx context.Context, embeddingB64 string) (map[string]any, error) {
 	body, err := json.Marshal(map[string]any{"embedding": embeddingB64})
 	if err != nil {
@@ -168,7 +179,7 @@ func (c *HTTP) InvertLive(ctx context.Context, embeddingB64 string) (map[string]
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	return c.doInvert(req)
+	return c.doInvert(c.liveHTTP, req)
 }
 
 // InvertConfig reports whether cryptod has a live GPU worker configured.
@@ -177,11 +188,11 @@ func (c *HTTP) InvertConfig(ctx context.Context) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c.doInvert(req)
+	return c.doInvert(c.http, req)
 }
 
-func (c *HTTP) doInvert(req *http.Request) (map[string]any, error) {
-	resp, err := c.http.Do(req)
+func (c *HTTP) doInvert(client *http.Client, req *http.Request) (map[string]any, error) {
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("cryptod %s: %w", req.URL.Path, err)
 	}

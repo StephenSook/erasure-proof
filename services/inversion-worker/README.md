@@ -8,7 +8,10 @@ their own click. The recorded golden run stays as the instant, free, reproducibl
   a GTR-base embedding (3072 bytes), it reconstructs the text with vec2text and returns the
   recovered text, the wall-clock seconds, and the SHA-256 of the exact input bytes, so the caller
   can prove the live run inverted the vector it displays. Auth: a shared secret in the body
-  (constant-time compared); only cryptod calls it, judges reach it through our rate-limited API.
+  (constant-time compared). cryptod is the only intended caller and the URL is not published; the
+  Go API in front of it adds a 2-slot concurrency semaphore and a rolling-hour budget, and the
+  worker caps at `max_containers=2`. For unattended production, set `requires_proxy_auth=True` on
+  the endpoint so Modal rejects unauthorized requests before a GPU container is assigned.
 
 ## Deploy
 

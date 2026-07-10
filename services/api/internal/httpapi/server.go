@@ -316,14 +316,21 @@ func (s *Server) handleDemoInversionLive(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
-	// Live inversion runs a real GPU model: give it a long budget, longer than cryptod's own
-	// worker timeout, so the client sees the real result rather than a premature gateway cutoff.
-	ctx, cancel := context.WithTimeout(r.Context(), 300*time.Second)
+	// Live inversion runs a real GPU model (cold start + the run, ~1-2.5 min). Order the deadlines
+	// Modal worker (300s) < cryptod wait (320s) < cryptod HTTP client (330s) < this handler (340s)
+	// so the innermost layer always finishes first and no layer abandons GPU work it already billed.
+	ctx, cancel := context.WithTimeout(r.Context(), 340*time.Second)
 	defer cancel()
 	v, err := s.demo.InversionLive(ctx, req.Embedding)
 	if errors.Is(err, demo.ErrLiveInversionBusy) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{
 			"error": "the GPU is busy with another live inversion; try again in a moment",
+		})
+		return
+	}
+	if errors.Is(err, demo.ErrLiveInversionBudget) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "the live-inversion hourly budget is used up; the recorded run is always available",
 		})
 		return
 	}

@@ -368,6 +368,29 @@ func TestInversionLive_ValidatesLengthAndProxies(t *testing.T) {
 	}
 }
 
+func TestInversionLive_HourlyBudgetGuard(t *testing.T) {
+	svc := demo.New(&store.Store{}, stubInverter{})
+	// Freeze the clock so the rolling window is deterministic.
+	base := time.Unix(1_700_000_000, 0)
+	svc.SetNowForTest(func() time.Time { return base })
+	emb := base64.StdEncoding.EncodeToString(bytesRepeat(0x01, 3072))
+
+	// Exhaust the hourly budget, then the next call is refused with ErrLiveInversionBudget.
+	for i := 0; i < demo.LiveInvertMaxPerHourForTest; i++ {
+		if _, err := svc.InversionLive(context.Background(), emb); err != nil {
+			t.Fatalf("run %d within budget failed: %v", i, err)
+		}
+	}
+	if _, err := svc.InversionLive(context.Background(), emb); !errors.Is(err, demo.ErrLiveInversionBudget) {
+		t.Fatalf("want ErrLiveInversionBudget after exhausting the budget, got %v", err)
+	}
+	// An hour and a bit later, the window has rolled and calls are allowed again.
+	svc.SetNowForTest(func() time.Time { return base.Add(61 * time.Minute) })
+	if _, err := svc.InversionLive(context.Background(), emb); err != nil {
+		t.Fatalf("want a fresh allowance after the window rolled, got %v", err)
+	}
+}
+
 func TestInversionLive_ConcurrencyGuard(t *testing.T) {
 	// Two slots. Fill both with blocked calls, then a third must get ErrLiveInversionBusy.
 	gate := make(chan struct{})

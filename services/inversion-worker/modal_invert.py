@@ -10,8 +10,9 @@ Design and cost guards:
   * The GTR encoder and the vec2text corrector are baked into the image at build time
     (download_models), so a warm container inverts without re-downloading weights.
   * gpu="T4", a short scaledown window, and a small max_containers cap bound the spend: a run is
-    a couple of GPU-minutes (~$0.02) and the container idles down quickly. Our backend is the
-    only caller (Bearer secret required); judges reach it only through our rate-limited API.
+    a couple of GPU-minutes (~$0.02), at most 2 containers run at once, and containers idle down
+    quickly. A body secret gates results, and the API layer that fronts this worker adds a
+    concurrency semaphore and a rolling-hour budget; the endpoint URL is not published.
   * transformers is pinned below 4.50 (4.50 breaks vec2text, issue #86); the embedding is the
     canonical unnormalized mean-pool the corrector was trained on.
 
@@ -82,8 +83,12 @@ class Inverter:
         import vec2text
         from fastapi import HTTPException
 
-        # Only our backend knows the secret (cryptod sends it in the body over TLS); judges reach
-        # this endpoint only through our rate-limited API, never directly. Constant-time compare.
+        # Auth: a shared secret in the body, constant-time compared. Only our backend knows it, and
+        # the endpoint URL is not published (the frontend calls our API, which calls cryptod, which
+        # holds the URL). Spend is bounded by max_containers (2 T4s) plus the API's concurrency
+        # semaphore and rolling-hour budget. Production hardening (not enabled here to keep the
+        # server-to-server call simple): set requires_proxy_auth=True on the endpoint so Modal
+        # rejects unauthorized requests at the edge, before a GPU container is assigned.
         secret = os.environ.get("INVERT_SECRET", "")
         presented = str(data.get("secret", ""))
         if not secret or not hmac.compare_digest(presented, secret):
