@@ -497,7 +497,8 @@ func (s *Service) TreeHead(ctx context.Context) (TreeHead, error) {
 // recomputes the leaf hash itself from the row's own chain hash (merkle.LeafHash / the browser
 // merkleLeafHash) and checks against the (root, tree_size) signed into the erasure proof, never
 // against values served by the same endpoint that supplied the audit path. This proof is against
-// the CURRENT tree; a proof anchored earlier signed an earlier snapshot (no consistency proof).
+// the CURRENT tree; a proof anchored earlier signed an earlier snapshot, and Consistency proves the
+// current tree extends it append-only.
 type InclusionView struct {
 	Seq       int64    `json:"seq"`
 	LeafIndex int      `json:"leaf_index"`
@@ -509,7 +510,11 @@ type InclusionView struct {
 
 // Inclusion returns the audit path proving the decision-log row with the given seq is included in
 // the current Merkle tree. ErrNotFound if no row has that seq.
-func (s *Service) Inclusion(ctx context.Context, seq int64) (InclusionView, error) {
+// Inclusion returns the audit proof that the decision-log row with the given seq is included in the
+// Merkle tree of size treeSize. treeSize <= 0 means the current tree; a positive treeSize computes
+// the proof within the FIRST treeSize leaves, so a verifier can check inclusion in the exact tree a
+// signed erasure proof committed to (not the current head, which has grown since).
+func (s *Service) Inclusion(ctx context.Context, seq int64, treeSize int) (InclusionView, error) {
 	rows, err := s.operator.Query(ctx, s.q.MustGet(qDecisionLogIndexed))
 	if err != nil {
 		return InclusionView{}, fmt.Errorf("decision log indexed: %w", err)
@@ -531,6 +536,13 @@ func (s *Service) Inclusion(ctx context.Context, seq int64) (InclusionView, erro
 	if err := rows.Err(); err != nil {
 		return InclusionView{}, err
 	}
+	// Restrict to the requested (signed) tree size. The seq must fall within it.
+	if treeSize > 0 {
+		if treeSize > len(leaves) || index < 0 || index >= treeSize {
+			return InclusionView{}, ErrNotFound
+		}
+		leaves = leaves[:treeSize]
+	}
 	if index < 0 {
 		return InclusionView{}, ErrNotFound
 	}
@@ -546,6 +558,45 @@ func (s *Service) Inclusion(ctx context.Context, seq int64) (InclusionView, erro
 		LeafHash:  hex.EncodeToString(merkle.LeafHash(leaves[index])),
 		AuditPath: auditPath,
 		Root:      hex.EncodeToString(merkle.Root(leaves)),
+	}, nil
+}
+
+// ConsistencyView is an RFC 6962 consistency proof that the tree at SizeFrom is an append-only
+// prefix of the tree at SizeTo (the log only grew, was never rewritten).
+type ConsistencyView struct {
+	SizeFrom int      `json:"size_from"`
+	SizeTo   int      `json:"size_to"`
+	Proof    []string `json:"proof"`     // hex
+	RootFrom string   `json:"root_from"` // hex, the earlier root
+	RootTo   string   `json:"root_to"`   // hex, the current root
+}
+
+// Consistency returns the RFC 6962 consistency proof between two tree sizes over the decision log,
+// so a verifier can confirm the current log is an append-only extension of the tree an older signed
+// proof committed to. sizeTo <= 0 means the current tree size.
+func (s *Service) Consistency(ctx context.Context, sizeFrom, sizeTo int) (ConsistencyView, error) {
+	all, err := s.leaves(ctx)
+	if err != nil {
+		return ConsistencyView{}, err
+	}
+	if sizeTo <= 0 || sizeTo > len(all) {
+		sizeTo = len(all)
+	}
+	if sizeFrom <= 0 || sizeFrom > sizeTo {
+		return ConsistencyView{}, ErrNotFound
+	}
+	upTo := all[:sizeTo]
+	proof := merkle.ConsistencyProof(upTo, sizeFrom)
+	hexProof := make([]string, len(proof))
+	for i, p := range proof {
+		hexProof[i] = hex.EncodeToString(p)
+	}
+	return ConsistencyView{
+		SizeFrom: sizeFrom,
+		SizeTo:   sizeTo,
+		Proof:    hexProof,
+		RootFrom: hex.EncodeToString(merkle.Root(all[:sizeFrom])),
+		RootTo:   hex.EncodeToString(merkle.Root(upTo)),
 	}, nil
 }
 

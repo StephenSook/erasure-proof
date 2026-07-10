@@ -1,9 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ApiError, getClient, type ProofView } from '../api'
+import { ApiError, type DemoApi, getClient, type ProofView } from '../api'
 import { CodeBlock } from '../components/CodeBlock'
 import { KeyValue, type KV } from '../components/KeyValue'
-import { pemToDer, sha256Hex, verifyProofSignature } from '../verify'
+import {
+  bytesToHex,
+  hexToBytes,
+  merkleLeafHash,
+  pemToDer,
+  sha256Hex,
+  verifyConsistency,
+  verifyInclusion,
+  verifyProofSignature,
+} from '../verify'
 
 // What the page proves, precisely: the signed body is authentic under the served key AND names the
 // subject in the URL (subject_hash == SHA-256(subject id), checked client-side). Facts rendered
@@ -24,7 +33,70 @@ type Status =
       body: Record<string, unknown>
       bodySha256: string
       keyFingerprint: string
+      transparency: Transparency
     }
+
+// The transparency check runs entirely in the browser against the SIGNED root and tree size: it
+// recomputes the erasure's leaf from the signed decision_log_head (never trusting the server's
+// leaf_hash), proves inclusion in the signed tree, and proves the current log is an append-only
+// extension of that tree (a consistency proof). This closes the "signed root is a snapshot" gap.
+type Transparency =
+  | { state: 'unavailable' } // older proof with no Merkle fields
+  | { state: 'checking' }
+  | { state: 'error'; message: string }
+  | {
+      state: 'done'
+      inclusionOk: boolean
+      consistencyOk: boolean
+      signedSize: number
+      currentSize: number
+      grew: boolean
+    }
+
+async function checkTransparency(body: Record<string, unknown>, api: DemoApi): Promise<Transparency> {
+  const merkleRoot = String(body.merkle_root ?? '')
+  const head = String(body.decision_log_head ?? '')
+  const signedSize = Number(body.tree_size ?? 0)
+  const seq = Number(body.decision_log_seq ?? 0)
+  if (!merkleRoot || !head || signedSize <= 0 || seq <= 0) {
+    return { state: 'unavailable' }
+  }
+  try {
+    // Inclusion in the SIGNED tree, with the leaf recomputed from the signed head.
+    const inc = await api.getInclusion(seq, signedSize)
+    const leafHashHex = bytesToHex(await merkleLeafHash(hexToBytes(head)))
+    const inclusionOk = await verifyInclusion(
+      leafHashHex,
+      inc.leaf_index,
+      signedSize,
+      inc.audit_path,
+      merkleRoot,
+    )
+    // Consistency: the current log is an append-only extension of the signed tree. Verify in EVERY
+    // case against the head the server actually presents, so the "append-only" verdict is never
+    // inferred from a server-reported size alone.
+    const head2 = await api.getTreeHead()
+    const currentSize = head2.tree_size
+    let consistencyOk: boolean
+    const grew = currentSize > signedSize
+    if (currentSize < signedSize) {
+      // The server reports a SMALLER tree than the one it signed: truncation or rewrite, not
+      // append-only. Fail closed.
+      consistencyOk = false
+    } else if (grew) {
+      const cons = await api.getConsistency(signedSize, currentSize)
+      consistencyOk =
+        cons.root_to === head2.root &&
+        (await verifyConsistency(signedSize, currentSize, cons.proof, merkleRoot, cons.root_to))
+    } else {
+      // Same size: the presented head must be byte-for-byte the signed root, or it was rewritten.
+      consistencyOk = head2.root === merkleRoot
+    }
+    return { state: 'done', inclusionOk, consistencyOk, signedSize, currentSize, grew }
+  } catch (e) {
+    return { state: 'error', message: e instanceof Error ? e.message : String(e) }
+  }
+}
 
 export function ProofVerifier() {
   const { subjectId: routeSubject } = useParams()
@@ -94,7 +166,12 @@ export function ProofVerifier() {
       return
     }
 
-    put({ kind: 'verified', proof, body, bodySha256: await sha256Hex(bodyBytes), keyFingerprint })
+    const bodySha256 = await sha256Hex(bodyBytes)
+    put({ kind: 'verified', proof, body, bodySha256, keyFingerprint, transparency: { state: 'checking' } })
+    // The transparency proofs need extra fetches; run them after the signature verdict and fold the
+    // result in (guarded by the generation counter so a stale check never overwrites a newer one).
+    const transparency = await checkTransparency(body, getClient())
+    put({ kind: 'verified', proof, body, bodySha256, keyFingerprint, transparency })
   }, [])
 
   useEffect(() => {
@@ -179,6 +256,7 @@ export function ProofVerifier() {
             <span className="mono">{status.proof.proof_ref ?? '(pending)'}</span>, which you can
             fetch and compare against the proof digest independently.
           </div>
+          {transparencyPanel(status.transparency)}
           <CodeBlock>{formatBody(status.proof.proof_body ?? '')}</CodeBlock>
           <div className="note">
             Trust anchor, stated honestly: this page receives the public key alongside the proof, so
@@ -190,6 +268,53 @@ export function ProofVerifier() {
         </>
       )}
     </div>
+  )
+}
+
+function transparencyPanel(t: Transparency) {
+  if (t.state === 'unavailable') {
+    return (
+      <div className="note">
+        Transparency-log check: this proof predates the RFC 6962 tree fields, so browser inclusion
+        and consistency verification is not available for it.
+      </div>
+    )
+  }
+  if (t.state === 'checking') {
+    return <div className="note">Transparency-log check: verifying inclusion and consistency...</div>
+  }
+  if (t.state === 'error') {
+    return <div className="note note--error">Transparency-log check failed: {t.message}</div>
+  }
+  return (
+    <>
+      <KeyValue
+        items={[
+          {
+            k: 'included in the signed tree',
+            v: t.inclusionOk ? `yes, leaf of tree size ${t.signedSize}` : 'NO',
+            tone: t.inclusionOk ? 'ok' : 'bad',
+          },
+          {
+            k: 'log is append-only since',
+            v: t.consistencyOk
+              ? t.grew
+                ? `yes, extended ${t.signedSize} to ${t.currentSize}, never rewritten`
+                : 'yes, head still matches the signed root'
+              : t.currentSize < t.signedSize
+                ? `NO, the served log (size ${t.currentSize}) is smaller than the signed tree`
+                : 'NO, consistency check failed',
+            tone: t.consistencyOk ? 'ok' : 'bad',
+          },
+        ]}
+      />
+      <div className="note">
+        Verified in your browser: the erasure&apos;s decision-log entry is a leaf of the exact tree
+        this signature committed to (leaf recomputed from the signed head, checked against the signed
+        root), and the current log is a consistent, append-only extension of it. The signed root is a
+        snapshot; the consistency proof shows the log only grew.
+      </div>
+    </>
   )
 }
 

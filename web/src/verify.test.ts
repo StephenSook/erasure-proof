@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { b64ToBytes, bytesToHex, merkleLeafHash, merkleNodeHash, pemToDer, sha256Hex, toRawSignature, verifyInclusion, verifyProofSignature } from './verify'
+import { b64ToBytes, bytesToHex, merkleLeafHash, merkleNodeHash, pemToDer, sha256Hex, toRawSignature, verifyConsistency, verifyInclusion, verifyProofSignature } from './verify'
 
 // These tests exercise the real WebCrypto implementation (Node's webcrypto under vitest): generate
 // a P-256 key, sign, and drive the exact code path the browser runs.
@@ -219,5 +219,75 @@ describe('verifyInclusion (RFC 6962, browser side)', () => {
     await expect(verifyInclusion(bytesToHex(la), 0, 2, ['gg'.repeat(32)], root)).rejects.toThrow(
       /malformed hex/,
     )
+  })
+})
+
+describe('verifyConsistency (RFC 6962, browser side)', () => {
+  const enc = (s: string) => new TextEncoder().encode(s)
+
+  // In-test prover mirroring the Go merkle.Root / ConsistencyProof (RFC 6962 subproof), so the
+  // browser verifier is cross-checked against independently computed roots for many (n, m).
+  function lpo2(n: number): number {
+    let k = 1
+    while (k < n) k <<= 1
+    return k >> 1
+  }
+  async function root(leaves: Uint8Array[]): Promise<Uint8Array> {
+    if (leaves.length === 1) return leaves[0]
+    const k = lpo2(leaves.length)
+    return merkleNodeHash(await root(leaves.slice(0, k)), await root(leaves.slice(k)))
+  }
+  async function subproof(m: number, leaves: Uint8Array[], b: boolean): Promise<Uint8Array[]> {
+    const n = leaves.length
+    if (m === n) return b ? [] : [await root(leaves)]
+    const k = lpo2(n)
+    if (m <= k) return [...(await subproof(m, leaves.slice(0, k), b)), await root(leaves.slice(k))]
+    return [...(await subproof(m - k, leaves.slice(k), false)), await root(leaves.slice(0, k))]
+  }
+  async function consistencyProof(leaves: Uint8Array[], m: number): Promise<Uint8Array[]> {
+    if (m <= 0 || m >= leaves.length) return []
+    return subproof(m, leaves, true)
+  }
+
+  it('verifies append-only extension for many (n, m) and rejects tampering', async () => {
+    for (let n = 1; n <= 12; n++) {
+      const leaves: Uint8Array[] = []
+      for (let i = 0; i < n; i++) leaves.push(await merkleLeafHash(enc(`leaf-${i}`)))
+      const rootTo = bytesToHex(await root(leaves))
+      for (let m = 1; m <= n; m++) {
+        const rootFrom = bytesToHex(await root(leaves.slice(0, m)))
+        const proof = (await consistencyProof(leaves, m)).map(bytesToHex)
+        expect(await verifyConsistency(m, n, proof, rootFrom, rootTo)).toBe(true)
+      }
+    }
+    // Tamper: wrong earlier root / wrong later root / bad node all fail.
+    const leaves: Uint8Array[] = []
+    for (let i = 0; i < 9; i++) leaves.push(await merkleLeafHash(enc(`x-${i}`)))
+    const rootTo = bytesToHex(await root(leaves))
+    const rootFrom = bytesToHex(await root(leaves.slice(0, 4)))
+    const proof = (await consistencyProof(leaves, 4)).map(bytesToHex)
+    expect(await verifyConsistency(4, 9, proof, rootTo, rootTo)).toBe(false)
+    expect(await verifyConsistency(4, 9, proof, rootFrom, rootFrom)).toBe(false)
+    if (proof.length > 0) {
+      const bad = [...proof]
+      bad[0] = 'aa'.repeat(32)
+      expect(await verifyConsistency(4, 9, bad, rootFrom, rootTo)).toBe(false)
+    }
+    expect(await verifyConsistency(9, 4, proof, rootTo, rootFrom)).toBe(false)
+  })
+
+  it('rejects a rewritten earlier history (fork), the adversarial direction', async () => {
+    const n = 11
+    const m = 5
+    const orig: Uint8Array[] = []
+    for (let i = 0; i < n; i++) orig.push(await merkleLeafHash(enc(`h-${i}`)))
+    const committedRoot1 = bytesToHex(await root(orig.slice(0, m)))
+    // Fork: rewrite a leaf inside the first-m prefix, then honestly prove consistency over the fork.
+    const forked = [...orig]
+    forked[2] = await merkleLeafHash(enc('rewritten'))
+    const forkedRoot2 = bytesToHex(await root(forked))
+    const proof = (await consistencyProof(forked, m)).map(bytesToHex)
+    // The honest proof over the forked tree must NOT verify against the genuine committed root1.
+    expect(await verifyConsistency(m, n, proof, committedRoot1, forkedRoot2)).toBe(false)
   })
 })

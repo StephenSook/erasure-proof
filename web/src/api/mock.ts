@@ -3,14 +3,17 @@
 // console runs end to end without a backend. createMockClient() returns a fresh instance per caller
 // so tests never share state.
 
+import { bytesToHex, hexToBytes, merkleLeafHash } from '../verify'
 import {
   type AgentConfig,
   ApiError,
   type ChainResult,
+  type ConsistencyView,
   type DecisionRow,
   type DemoApi,
   type EraseResponse,
   type ForensicsAudit,
+  type InclusionView,
   type InversionConfig,
   type InversionGoldenRun,
   type LiveInversion,
@@ -18,6 +21,7 @@ import {
   type MemoryWriterResult,
   type ProofView,
   type RbacResult,
+  type TreeHead,
 } from './types'
 
 const DEMO_SENTENCE = 'Stephen Sookra is a full-stack developer who builds on CockroachDB and AWS.'
@@ -77,6 +81,8 @@ export function createMockClient(): DemoApi {
   let proofBody = ''
   let proofSignature = ''
   let signerPem = ''
+  let mockHead = ''
+  let mockRoot = ''
 
   const requireSubject = () => {
     if (!subjectId) {
@@ -195,11 +201,17 @@ export function createMockClient(): DemoApi {
       const subjectHash = Array.from(new Uint8Array(digest), (b) =>
         b.toString(16).padStart(2, '0'),
       ).join('')
+      // A single-leaf transparency tree so the /proof/:id inclusion + consistency panel verifies
+      // end to end in mock mode: leaf = the decision-log head, root = LeafHash(head), size 1.
+      mockHead = '22'.repeat(32)
+      mockRoot = bytesToHex(await merkleLeafHash(hexToBytes(mockHead)))
       proofBody = JSON.stringify({
         source: 'MOCK (runtime-signed with a throwaway key in this tab)',
         subject_hash: subjectHash,
-        decision_log_seq: 2,
-        chain_head: '22'.repeat(32),
+        decision_log_seq: 1,
+        decision_log_head: mockHead,
+        merkle_root: mockRoot,
+        tree_size: 1,
         key_state: 'wrapped_key_destroyed',
         occurred_at: FIXED_TIME,
       })
@@ -276,6 +288,18 @@ export function createMockClient(): DemoApi {
         message: 'user agent_worker does not have UPDATE privilege on relation decision_log',
       }
       return result
+    },
+    // The mock transparency tree is a single leaf (the erasure's decision-log head), so the
+    // /proof/:id inclusion + consistency panel verifies end to end without a real log.
+    async getTreeHead(): Promise<TreeHead> {
+      return { tree_size: 1, root: mockRoot }
+    },
+    async getInclusion(seq: number): Promise<InclusionView> {
+      return { seq, leaf_index: 0, tree_size: 1, leaf_hash: mockRoot, audit_path: [], root: mockRoot }
+    },
+    async getConsistency(from: number, to?: number): Promise<ConsistencyView> {
+      const t = to && to > 0 ? to : 1
+      return { size_from: from, size_to: t, proof: [], root_from: mockRoot, root_to: mockRoot }
     },
   }
 }

@@ -16,6 +16,31 @@ export interface MemoryView {
   created_at: string
 }
 
+// TreeHead is the current RFC 6962 Merkle head over the decision log.
+export interface TreeHead {
+  tree_size: number
+  root: string // hex
+}
+
+// InclusionView is an audit proof that a decision-log entry is a leaf of a tree of the given size.
+export interface InclusionView {
+  seq: number
+  leaf_index: number
+  tree_size: number
+  leaf_hash: string // hex (convenience echo; a sound verifier recomputes it from the row's own hash)
+  audit_path: string[] // hex, leaf-to-root
+  root: string // hex
+}
+
+// ConsistencyView is a proof that the tree at size_from is an append-only prefix of size_to.
+export interface ConsistencyView {
+  size_from: number
+  size_to: number
+  proof: string[] // hex
+  root_from: string // hex
+  root_to: string // hex
+}
+
 export interface EraseResult {
   decision_log_seq: number
   subject_hash: string // base64
@@ -167,4 +192,7 @@ export interface DemoApi {
   getDecisionLog(): Promise<DecisionRow[]>
   verifyChain(): Promise<ChainResult>
   rbacDemo(): Promise<RbacResult>
+  getTreeHead(): Promise<TreeHead>
+  getInclusion(seq: number, treeSize?: number): Promise<InclusionView>
+  getConsistency(from: number, to?: number): Promise<ConsistencyView>
 }

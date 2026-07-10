@@ -311,7 +311,7 @@ func TestTreeHeadAndInclusion(t *testing.T) {
 		t.Fatalf("tree head = %+v, want size 3 and a 64-hex root", th)
 	}
 
-	inc, err := svc.Inclusion(ctx, 2)
+	inc, err := svc.Inclusion(ctx, 2, 0)
 	if err != nil {
 		t.Fatalf("Inclusion: %v", err)
 	}
@@ -320,6 +320,34 @@ func TestTreeHeadAndInclusion(t *testing.T) {
 	}
 	if inc.Root != th.Root {
 		t.Error("inclusion root must equal the tree-head root")
+	}
+
+	// Inclusion within the SIGNED tree size 2 (before the third row): leaf still present, but the
+	// root is the size-2 root, which a signed proof of that era would have committed to.
+	inc2, err := svc.Inclusion(ctx, 2, 2)
+	if err != nil {
+		t.Fatalf("Inclusion(size=2): %v", err)
+	}
+	if inc2.TreeSize != 2 || inc2.Root == th.Root {
+		t.Errorf("size-restricted inclusion = %+v, want tree size 2 and a different (earlier) root", inc2)
+	}
+
+	// Consistency: the size-2 tree must be an append-only prefix of the current size-3 tree.
+	cons, err := svc.Consistency(ctx, 2, 0)
+	if err != nil {
+		t.Fatalf("Consistency: %v", err)
+	}
+	cp := make([][]byte, len(cons.Proof))
+	for i, p := range cons.Proof {
+		cp[i], _ = hex.DecodeString(p)
+	}
+	rf, _ := hex.DecodeString(cons.RootFrom)
+	rt, _ := hex.DecodeString(cons.RootTo)
+	if !merkle.VerifyConsistency(cons.SizeFrom, cons.SizeTo, cp, rf, rt) {
+		t.Error("the returned consistency proof did not verify")
+	}
+	if r2, _ := hex.DecodeString(inc2.Root); !bytesEqual(rf, r2) {
+		t.Error("consistency RootFrom must equal the size-2 inclusion root")
 	}
 
 	// Verify the audit proof exactly as a client would, with the merkle package.
@@ -337,9 +365,21 @@ func TestTreeHeadAndInclusion(t *testing.T) {
 		t.Error("a tampered leaf verified against the proof")
 	}
 
-	if _, err := svc.Inclusion(ctx, 99); !errors.Is(err, demo.ErrNotFound) {
+	if _, err := svc.Inclusion(ctx, 99, 0); !errors.Is(err, demo.ErrNotFound) {
 		t.Errorf("Inclusion(unknown seq) = %v, want ErrNotFound", err)
 	}
+}
+
+func bytesEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func bytesRepeat(b byte, n int) []byte {

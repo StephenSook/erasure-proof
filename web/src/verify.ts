@@ -100,7 +100,7 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
 
 // Fails loudly on malformed input (odd length, non-hex characters) instead of coercing NaN to
 // zero bytes, so a transport/encoding bug is distinguishable from a genuine exclusion.
-function hexToBytes(hex: string): Uint8Array<ArrayBuffer> {
+export function hexToBytes(hex: string): Uint8Array<ArrayBuffer> {
   if (hex.length % 2 !== 0 || /[^0-9a-fA-F]/.test(hex)) {
     throw new Error('malformed hex string')
   }
@@ -175,7 +175,8 @@ async function computeRoot(
  * verifier via merkleLeafHash from the row's own chain hash, never taken from the server asserting
  * inclusion, and treeSize must come from the SIGNED proof, not from the endpoint that supplied the
  * audit path. The signed root is a snapshot at anchor time; after later log appends the live tree
- * diverges (no consistency proof is implemented), so verify against the signed (root, tree_size).
+ * diverges, so verify against the signed (root, tree_size), then use verifyConsistency to show the
+ * current tree is an append-only extension of that snapshot.
  * Every hash must be exactly 32 bytes (64 hex chars): without the width guard, a spliced
  * over-length "leaf" plus a short sibling can reconstruct a genuine root from non-leaf data.
  */
@@ -199,6 +200,118 @@ export async function verifyInclusion(
     auditPathHex.map(hexToBytes),
   )
   return computed !== null && bytesToHex(computed) === rootHex.toLowerCase()
+}
+
+// --- RFC 6962 consistency proof (browser verifier, mirrors the Go merkle.VerifyConsistency) ---
+// The bit helpers below use 32-bit operators (>>>, ^), so they are correct for tree sizes < 2^31.
+// A decision log never approaches that, and bitLen uses Math.floor to avoid any 32-bit dependence.
+
+function trailingZeros(x: number): number {
+  if (x === 0) return 0
+  let n = 0
+  while ((x & 1) === 0) {
+    n++
+    x >>>= 1
+  }
+  return n
+}
+
+function bitLen(x: number): number {
+  let n = 0
+  while (x > 0) {
+    n++
+    x = Math.floor(x / 2)
+  }
+  return n
+}
+
+function onesCount(x: number): number {
+  let c = 0
+  while (x > 0) {
+    c += x & 1
+    x >>>= 1
+  }
+  return c
+}
+
+async function chainInner(seed: Uint8Array, proof: Uint8Array[], index: number): Promise<Uint8Array> {
+  let acc = seed
+  for (let i = 0; i < proof.length; i++) {
+    acc = ((index >>> i) & 1) === 0 ? await merkleNodeHash(acc, proof[i]) : await merkleNodeHash(proof[i], acc)
+  }
+  return acc
+}
+
+async function chainInnerRight(
+  seed: Uint8Array,
+  proof: Uint8Array[],
+  index: number,
+): Promise<Uint8Array> {
+  let acc = seed
+  for (let i = 0; i < proof.length; i++) {
+    if (((index >>> i) & 1) === 1) {
+      acc = await merkleNodeHash(proof[i], acc)
+    }
+  }
+  return acc
+}
+
+async function chainBorderRight(seed: Uint8Array, proof: Uint8Array[]): Promise<Uint8Array> {
+  let acc = seed
+  for (const h of proof) {
+    acc = await merkleNodeHash(h, acc)
+  }
+  return acc
+}
+
+/**
+ * Verify an RFC 6962 consistency proof entirely in the browser: that the tree of size sizeFrom with
+ * rootFrom is an append-only prefix of the tree of size sizeTo with rootTo (the log only grew, was
+ * never rewritten). All hash arguments are hex. Reconstructs BOTH roots from the proof and checks
+ * each. This lets a verifier confirm the current decision log extends the exact tree an older signed
+ * erasure proof committed to.
+ */
+export async function verifyConsistency(
+  sizeFrom: number,
+  sizeTo: number,
+  proofHex: string[],
+  rootFromHex: string,
+  rootToHex: string,
+): Promise<boolean> {
+  if (sizeFrom <= 0 || sizeFrom > sizeTo) return false
+  if (rootFromHex.length !== 64 || rootToHex.length !== 64) return false
+  if (proofHex.some((p) => p.length !== 64)) return false
+  const rootFrom = rootFromHex.toLowerCase()
+  const rootTo = rootToHex.toLowerCase()
+  if (sizeFrom === sizeTo) {
+    return proofHex.length === 0 && rootFrom === rootTo
+  }
+  if (proofHex.length === 0) return false
+
+  const inner0 = bitLen((sizeFrom - 1) ^ (sizeTo - 1))
+  const border = onesCount((sizeFrom - 1) >>> inner0)
+  const shift = trailingZeros(sizeFrom)
+  const inner = inner0 - shift
+
+  let seed: Uint8Array
+  let start: number
+  if (sizeFrom === 1 << shift) {
+    seed = hexToBytes(rootFromHex)
+    start = 0
+  } else {
+    seed = hexToBytes(proofHex[0])
+    start = 1
+  }
+  if (proofHex.length !== start + inner + border) return false
+
+  const proof = proofHex.slice(start).map(hexToBytes)
+  const mask = (sizeFrom - 1) >>> shift
+  const innerProof = proof.slice(0, inner)
+  const borderProof = proof.slice(inner)
+
+  const hash1 = await chainBorderRight(await chainInnerRight(seed, innerProof, mask), borderProof)
+  const hash2 = await chainBorderRight(await chainInner(seed, innerProof, mask), borderProof)
+  return bytesToHex(hash1) === rootFrom && bytesToHex(hash2) === rootTo
 }
 
 /** Copy any Uint8Array (whatever its backing buffer type) into a plain ArrayBuffer-backed one. */
