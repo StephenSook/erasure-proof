@@ -23,7 +23,7 @@ from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel
 
-from . import aead, anchor, kms, proof, settings, signing
+from . import aead, anchor, inversion, kms, proof, settings, signing
 
 log = logging.getLogger("cryptod")
 
@@ -93,6 +93,14 @@ def create_app(cfg: settings.Settings | None = None) -> FastAPI:
     @app.get("/healthz")
     def healthz() -> dict:
         return {"ok": True}
+
+    @app.get("/invert")
+    def invert() -> dict:
+        """Serve the recorded Vec2Text golden run (the illustrative attack), clearly labeled."""
+        try:
+            return inversion.recorded_golden_run()
+        except FileNotFoundError as e:
+            raise HTTPException(503, "recorded golden run not available") from e
 
     @app.post("/prepare")
     def prepare(req: PrepareRequest) -> dict:
