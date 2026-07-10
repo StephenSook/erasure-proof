@@ -9,22 +9,25 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/StephenSook/erasure-proof/services/api/internal/demo"
 	"github.com/StephenSook/erasure-proof/services/api/internal/erasure"
 	"github.com/StephenSook/erasure-proof/services/api/internal/ingest"
 	"github.com/StephenSook/erasure-proof/services/api/internal/store"
 )
 
-// Server wires the store, the ingest path, and the erasure orchestrator to HTTP handlers.
+// Server wires the store, the ingest path, the erasure orchestrator, and the read-only demo gateway
+// to HTTP handlers.
 type Server struct {
 	store    *store.Store
 	orch     *erasure.Orchestrator
 	ingester *ingest.Ingester
+	demo     *demo.Service
 	commit   string // the deployed git SHA, echoed by /healthz so we can prove what is served
 }
 
 // New builds a Server.
-func New(s *store.Store, orch *erasure.Orchestrator, ingester *ingest.Ingester, commit string) *Server {
-	return &Server{store: s, orch: orch, ingester: ingester, commit: commit}
+func New(s *store.Store, orch *erasure.Orchestrator, ingester *ingest.Ingester, dsvc *demo.Service, commit string) *Server {
+	return &Server{store: s, orch: orch, ingester: ingester, demo: dsvc, commit: commit}
 }
 
 // Routes returns the HTTP handler.
@@ -33,6 +36,13 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("POST /memories", s.handleIngest)
 	mux.HandleFunc("POST /erase", s.handleErase)
+	// Read-only demo gateway (the browser-facing six-stage console).
+	mux.HandleFunc("GET /api/memory", s.handleDemoMemory)
+	mux.HandleFunc("GET /api/proof", s.handleDemoProof)
+	mux.HandleFunc("GET /api/decision-log", s.handleDemoDecisionLog)
+	mux.HandleFunc("GET /api/inversion", s.handleDemoInversion)
+	mux.HandleFunc("POST /api/verify-chain", s.handleDemoVerifyChain)
+	mux.HandleFunc("POST /api/rbac-demo", s.handleDemoRbac)
 	return mux
 }
 
@@ -156,4 +166,94 @@ func (s *Server) handleErase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"result": res, "proof_ref": proofRef})
+}
+
+// --- Read-only demo gateway handlers ---
+
+func (s *Server) handleDemoMemory(w http.ResponseWriter, r *http.Request) {
+	subjectID := r.URL.Query().Get("subject_id")
+	if subjectID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "subject_id required"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	v, err := s.demo.Memory(ctx, subjectID)
+	switch {
+	case errors.Is(err, demo.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no memory for subject"})
+	case err != nil:
+		log.Printf("httpapi: demo memory failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+	default:
+		writeJSON(w, http.StatusOK, v)
+	}
+}
+
+func (s *Server) handleDemoProof(w http.ResponseWriter, r *http.Request) {
+	subjectID := r.URL.Query().Get("subject_id")
+	if subjectID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "subject_id required"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	v, err := s.demo.Proof(ctx, subjectID)
+	switch {
+	case errors.Is(err, demo.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no erasure record for subject"})
+	case err != nil:
+		log.Printf("httpapi: demo proof failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+	default:
+		writeJSON(w, http.StatusOK, v)
+	}
+}
+
+func (s *Server) handleDemoDecisionLog(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	rows, err := s.demo.DecisionLog(ctx)
+	if err != nil {
+		log.Printf("httpapi: demo decision-log failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"rows": rows})
+}
+
+func (s *Server) handleDemoVerifyChain(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	result, err := s.demo.VerifyChain(ctx)
+	if err != nil {
+		log.Printf("httpapi: demo verify-chain failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "verification failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleDemoRbac(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	result, err := s.demo.RbacDemo(ctx)
+	if err != nil {
+		log.Printf("httpapi: demo rbac probe failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "probe failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleDemoInversion(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	v, err := s.demo.Inversion(ctx)
+	if err != nil {
+		log.Printf("httpapi: demo inversion failed: %v", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "inversion unavailable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
 }
