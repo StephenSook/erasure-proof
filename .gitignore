@@ -1,0 +1,78 @@
+# --- Secrets and credentials (NEVER commit) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+certs/
+secrets/
+service-account*.json
+aws-credentials
+.aws/
+
+# --- Research and planning artifacts (kept private, never in this public repo) ---
+*.pdf
+research/
+plans/
+CONCEPT_LOCK*
+WEEK_ONE_KILL*
+*methodology*
+
+# --- Go ---
+/services/api/bin/
+*.test
+*.out
+vendor/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.uv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# --- ML model caches (large, downloaded on demand) ---
+.cache/
+models/
+*.safetensors
+*.bin
+hf_cache/
+
+# --- Node / frontend ---
+node_modules/
+web/dist/
+web/.vite/
+*.tsbuildinfo
+
+# --- Terraform ---
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+
+# --- Docker local volumes ---
+deploy/local/data/
+cockroach-data*/
+
+# --- OS / IDE ---
+.DS_Store
+.AppleDouble
+._*
+.vscode/
+.idea/
+*.swp
+
+# --- Logs ---
+*.log
