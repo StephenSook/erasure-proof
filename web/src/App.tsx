@@ -1,9 +1,21 @@
+import { lazy, Suspense } from 'react'
 import { NavLink, Route, Routes } from 'react-router-dom'
-import { Architecture } from './pages/Architecture'
-import { DemoConsole } from './pages/DemoConsole'
 import { Landing } from './pages/Landing'
-import { ProofVerifier } from './pages/ProofVerifier'
-import { Trust } from './pages/Trust'
+
+// The landing page stays eager (it is the entry; a spinner there would be worse than the bytes).
+// Every other page is its own chunk, so the first paint ships without the demo console, the
+// WebCrypto verifier, or the architecture SVG. Each page keeps a named export for tests; the
+// .then() maps it to the default shape lazy() expects.
+const DemoConsole = lazy(() =>
+  import('./pages/DemoConsole').then((m) => ({ default: m.DemoConsole })),
+)
+const ProofVerifier = lazy(() =>
+  import('./pages/ProofVerifier').then((m) => ({ default: m.ProofVerifier })),
+)
+const Architecture = lazy(() =>
+  import('./pages/Architecture').then((m) => ({ default: m.Architecture })),
+)
+const Trust = lazy(() => import('./pages/Trust').then((m) => ({ default: m.Trust })))
 
 const navClass = ({ isActive }: { isActive: boolean }) => (isActive ? 'active' : undefined)
 
@@ -32,15 +44,19 @@ export function App() {
           </NavLink>
         </nav>
       </header>
-      <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route path="/demo" element={<DemoConsole />} />
-        <Route path="/proof" element={<ProofVerifier />} />
-        <Route path="/proof/:subjectId" element={<ProofVerifier />} />
-        <Route path="/architecture" element={<Architecture />} />
-        <Route path="/trust" element={<Trust />} />
-        <Route path="*" element={<Landing />} />
-      </Routes>
+      {/* The fallback is intentionally quiet: chunks arrive from CloudFront in tens of ms, and a
+          flashing spinner would be more visible than the wait. */}
+      <Suspense fallback={<div className="page-loading" aria-busy="true" />}>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/demo" element={<DemoConsole />} />
+          <Route path="/proof" element={<ProofVerifier />} />
+          <Route path="/proof/:subjectId" element={<ProofVerifier />} />
+          <Route path="/architecture" element={<Architecture />} />
+          <Route path="/trust" element={<Trust />} />
+          <Route path="*" element={<Landing />} />
+        </Routes>
+      </Suspense>
     </div>
   )
 }

@@ -43,6 +43,11 @@ button {
 .muted {
   color: var(--fg-2);
 }
+/* Suspense fallback while a route chunk loads: reserve height so the header does not jump, show
+   nothing (chunks arrive in tens of ms; any spinner would be more visible than the wait). */
+.page-loading {
+  min-height: 60dvh;
+}
 .mono {
   font-family: var(--font-mono);
 }
