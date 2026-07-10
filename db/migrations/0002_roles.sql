@@ -6,10 +6,12 @@
 -- from ownership. The property is only as strong as custody of the crdb_admin_owner credential.
 -- We never claim the table is immutable to everyone.
 
+-- crdb_admin_owner owns the tables but cannot log in: ownership power is not a login surface.
 CREATE ROLE IF NOT EXISTS crdb_admin_owner;
-CREATE ROLE IF NOT EXISTS agent_worker;
-CREATE ROLE IF NOT EXISTS operator;
-CREATE ROLE IF NOT EXISTS forensics_reader;
+-- The three service roles authenticate via DSN (password/cert in the cloud, open locally).
+CREATE ROLE IF NOT EXISTS agent_worker WITH LOGIN;
+CREATE ROLE IF NOT EXISTS operator WITH LOGIN;
+CREATE ROLE IF NOT EXISTS forensics_reader WITH LOGIN;
 
 -- All four tables are owned by the locked-down admin role, so the agent and operator roles
 -- cannot ALTER or otherwise escalate on them.
