@@ -1,4 +1,4 @@
-import { useEffect, useRef, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge } from '../components/Badge'
 import { CodeBlock } from '../components/CodeBlock'
@@ -29,6 +29,7 @@ function scrollToStage(id: StageId) {
 
 export function DemoConsole() {
   const { state, actions } = useDemo()
+  const [writerTurn, setWriterTurn] = useState('')
 
   // The action records its own error in state; swallow the rejection so an individual stage click
   // never leaves an unhandled promise rejection on the console.
@@ -129,6 +130,55 @@ export function DemoConsole() {
     return null
   }
 
+  function memoryWriterPanel() {
+    const written = state.memWriter
+    return (
+      <div className="live-leak">
+        <div className="live-leak__head">
+          <Badge kind={state.memWriterAvailable ? 'live' : 'recorded'}>
+            {state.memWriterAvailable ? 'Live AI memory-writer' : 'Recorded memory-writer'}
+          </Badge>
+        </div>
+        <div className="note">
+          Or let the agent write the memory: type something a person told an assistant. Claude
+          distils the one durable fact, embeds it, and stores it as the memory this loop then erases.
+        </div>
+        <textarea
+          className="writer-input"
+          rows={2}
+          placeholder="e.g. Hi, I'm Marie Curie and I discovered radium and polonium in 1898."
+          value={writerTurn}
+          onChange={(e) => setWriterTurn(e.target.value)}
+        />
+        <div className="live-leak__head">
+          <button
+            className="btn btn--small"
+            onClick={() => void actions.runMemoryWriter(writerTurn)}
+            disabled={state.memWriterStatus === 'running' || writerTurn.trim().length === 0}
+          >
+            {state.memWriterStatus === 'running' ? 'The agent is writing the memory...' : 'Write it with the agent'}
+          </button>
+        </div>
+        {state.memWriterError && <div className="note note--error">{state.memWriterError}</div>}
+        {written && state.memWriterStatus === 'done' && (
+          <>
+            <KeyValue
+              items={[
+                { k: 'distilled memory', v: written.memory_text, tone: 'ok' },
+                { k: 'source', v: written.source === 'live_bedrock' ? 'live Claude on Bedrock' : 'recorded (agent not wired)', tone: written.source === 'live_bedrock' ? 'ok' : undefined },
+                { k: 'stored as subject', v: short(written.subject_id, 20) },
+              ]}
+            />
+            <div className="note">
+              This memory is now the subject the rest of the loop erases. On a wired deploy it is a
+              real GTR embedding, so the live inversion beat reconstructs your own words.
+            </div>
+          </>
+        )}
+      </div>
+    )
+  }
+
   function liveLeakPanel() {
     // Only offer the live GPU run where a worker is actually wired; otherwise the recorded run
     // above stands on its own (honest: no dead button).
@@ -193,7 +243,7 @@ export function DemoConsole() {
         return (
           <>
             <div className="note">
-              Storing: <span className="mono">{demoMemory.text}</span>
+              Storing: <span className="mono">{state.memWriter?.memory_text ?? demoMemory.text}</span>
             </div>
             {state.memory && (
               <KeyValue
@@ -207,6 +257,7 @@ export function DemoConsole() {
                 ]}
               />
             )}
+            {memoryWriterPanel()}
           </>
         )
       case 'leak':

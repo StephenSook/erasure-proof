@@ -57,6 +57,19 @@ describe('mock client', () => {
     expect(live.input_sha256).toMatch(/^[0-9a-f]{64}$/)
   })
 
+  it('memory-writer distils a fact, stores a subject, labeled recorded', async () => {
+    const api = createMockClient()
+    expect((await api.getAgentConfig()).memory_writer_available).toBe(false)
+    const written = await api.writeMemory("Hi, I'm Marie Curie. I discovered radium.")
+    expect(written.source).toBe('recorded')
+    expect(written.memory_text).toBe("Hi, I'm Marie Curie.")
+    expect(written.subject_id).toMatch(/^[0-9a-f-]{36}$/)
+    // The written memory becomes the live subject the loop reads.
+    const mem = await api.getMemory(written.subject_id)
+    expect(mem.subject_id).toBe(written.subject_id)
+    expect(mem.embedding_present).toBe(true)
+  })
+
   it('forensics agent verdict reflects real erasure state, labeled as recorded', async () => {
     const api = createMockClient()
     expect((await api.getAgentConfig()).live_available).toBe(false)

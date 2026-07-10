@@ -14,6 +14,7 @@ import {
   type InversionGoldenRun,
   type LiveInversion,
   type MemoryView,
+  type MemoryWriterResult,
   type ProofView,
   type RbacResult,
 } from './types'
@@ -73,6 +74,9 @@ export function createHttpClient(base = ''): DemoApi {
     },
     forensicsAudit(subjectId) {
       return request<ForensicsAudit>(b, 'POST', '/api/agent/forensics', { subject_id: subjectId })
+    },
+    writeMemory(turn) {
+      return request<MemoryWriterResult>(b, 'POST', '/api/agent/memory-writer', { turn })
     },
     erase(subjectId, lawfulBasis = 'gdpr_art_17') {
       return request<EraseResponse>(b, 'POST', '/erase', {

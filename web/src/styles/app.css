@@ -434,6 +434,23 @@ button {
   color: color-mix(in srgb, var(--hue) 70%, var(--fg-1));
 }
 
+/* Memory-writer input. */
+.writer-input {
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+  color: var(--fg-0);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+}
+.writer-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--hue) 55%, var(--line-strong));
+}
+
 /* LCD instrument strip (DSEG faces; the ghost span is the unlit segments underlay) */
 .lcd-strip {
   display: flex;

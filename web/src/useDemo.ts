@@ -9,6 +9,7 @@ import {
   type InversionGoldenRun,
   type LiveInversion,
   type MemoryView,
+  type MemoryWriterResult,
   type ProofView,
   type RbacResult,
 } from './api'
@@ -30,6 +31,11 @@ export interface DemoState {
   agentStatus: 'idle' | 'running' | 'done' | 'error'
   agentError?: string
   agentAvailable?: boolean
+  // Live Bedrock memory-writer: the AI distils + stores a memory the loop then erases.
+  memWriter?: MemoryWriterResult
+  memWriterStatus: 'idle' | 'running' | 'done' | 'error'
+  memWriterError?: string
+  memWriterAvailable?: boolean
   erase?: EraseResponse
   proof?: ProofView
   decisionLog?: DecisionRow[]
@@ -53,6 +59,7 @@ const initialState = (): DemoState => ({
   subjectId: '',
   liveStatus: 'idle',
   agentStatus: 'idle',
+  memWriterStatus: 'idle',
   status: idleStatus(),
   error: {},
   doneSeq: zeroSeq(),
@@ -145,15 +152,54 @@ export function useDemo(injected?: DemoApi) {
     }
   }, [])
 
-  // Probe whether the live Bedrock forensics agent is wired.
+  // Probe which live Bedrock agent features are wired.
   const checkAgent = useCallback(async () => {
     try {
       const cfg = await clientRef.current!.getAgentConfig()
-      setState((s) => ({ ...s, agentAvailable: cfg.live_available }))
+      setState((s) => ({
+        ...s,
+        agentAvailable: cfg.forensics_available ?? cfg.live_available,
+        memWriterAvailable: cfg.memory_writer_available ?? false,
+      }))
     } catch {
-      setState((s) => ({ ...s, agentAvailable: false }))
+      setState((s) => ({ ...s, agentAvailable: false, memWriterAvailable: false }))
     }
   }, [])
+
+  // Have the agent write a memory from a typed sentence: Claude distils the durable fact, it is
+  // embedded and stored, and it BECOMES the subject the rest of the loop erases (so the leak and
+  // erase beats run on the judge's own agent-written memory). Mock mode stores a labeled recorded
+  // memory the same way.
+  const runMemoryWriter = useCallback(
+    async (turn: string) => {
+      setState((s) => ({ ...s, memWriterStatus: 'running', memWriterError: undefined }))
+      try {
+        const written = await clientRef.current!.writeMemory(turn)
+        subjectRef.current = written.subject_id
+        const mem = await clientRef.current!.getMemory(written.subject_id)
+        setState((s) => ({
+          ...s,
+          memWriter: written,
+          memWriterStatus: 'done',
+          subjectId: written.subject_id,
+          memory: mem,
+          memoryAfter: undefined,
+          erase: undefined,
+          proof: undefined,
+          // Mark stage 1 complete so the loop can continue on the agent-written memory.
+          status: { ...s.status, memory: 'done' },
+          doneSeq: { ...s.doneSeq, memory: s.doneSeq.memory + 1 },
+        }))
+      } catch (e) {
+        setState((s) => ({
+          ...s,
+          memWriterStatus: 'error',
+          memWriterError: e instanceof Error ? e.message : String(e),
+        }))
+      }
+    },
+    [],
+  )
 
   // Have the AI agent prove the erasure: a Claude tool-use loop over the read-only tools, returning
   // a verdict with its evidence trace. Mock mode returns an honestly-labeled recorded verdict.
@@ -236,6 +282,7 @@ export function useDemo(injected?: DemoApi) {
       runLiveLeak,
       checkAgent,
       runForensics,
+      runMemoryWriter,
       runEnvelope,
       runErase,
       runDurability,
@@ -250,6 +297,7 @@ export function useDemo(injected?: DemoApi) {
       runLiveLeak,
       checkAgent,
       runForensics,
+      runMemoryWriter,
       runEnvelope,
       runErase,
       runDurability,
