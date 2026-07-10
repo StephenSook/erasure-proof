@@ -62,6 +62,12 @@ export function DemoConsole() {
     }
   }, [])
 
+  // Probe once whether the live GPU worker is wired, so the live-inversion button appears only
+  // when it can actually run (a deploy without MODAL_INVERT_* shows the recorded path only).
+  useEffect(() => {
+    void actions.checkLive()
+  }, [actions])
+
   // On each stage completing, flare its bar, stagger its results in, and scramble-in any value
   // marked data-scramble (the leak's recovered text, the erase after-state). Completion is detected
   // via the monotonic doneSeq counter, not status diffing, because React can batch the running and
@@ -122,6 +128,64 @@ export function DemoConsole() {
     return null
   }
 
+  function liveLeakPanel() {
+    // Only offer the live GPU run where a worker is actually wired; otherwise the recorded run
+    // above stands on its own (honest: no dead button).
+    if (!state.liveAvailable) {
+      return (
+        <div className="note">
+          Live GPU inversion is not wired on this deployment. The recorded run above is the
+          reproducible attack; its provenance is on the Trust page.
+        </div>
+      )
+    }
+    const live = state.liveInversion
+    const matches = live?.input_sha256 === demoMemory.embeddingSha256
+    return (
+      <div className="live-leak">
+        <div className="live-leak__head">
+          <Badge kind="live">Live GPU</Badge>
+          <button
+            className="btn btn--small"
+            onClick={() => void actions.runLiveLeak()}
+            disabled={state.liveStatus === 'running'}
+          >
+            {state.liveStatus === 'running'
+              ? 'Inverting on a Modal T4 GPU...'
+              : 'Run the attack yourself on a GPU (~60-90s)'}
+          </button>
+        </div>
+        {state.liveStatus === 'running' && (
+          <div className="note">
+            A real T4 GPU is reconstructing the sentence from the embedding bytes, live. This is the
+            honest cost of doing it for real: cold start plus the inversion.
+          </div>
+        )}
+        {state.liveError && <div className="note note--error">{state.liveError}</div>}
+        {live && state.liveStatus === 'done' && (
+          <>
+            <KeyValue
+              items={[
+                { k: 'recovered text (live)', v: String(live.recovered_text ?? ''), tone: 'bad', scramble: true },
+                { k: 'source', v: live.source === 'live_gpu' ? 'live GPU (Modal T4)' : 'recorded (worker fell back)', tone: live.source === 'live_gpu' ? 'ok' : undefined },
+                ...(live.seconds ? [{ k: 'seconds', v: String(live.seconds) }] : []),
+                ...(live.device ? [{ k: 'device', v: String(live.device) }] : []),
+                { k: 'inverted vector sha-256', v: short(live.input_sha256, 24) },
+                { k: 'matches the vector shown', v: matches ? 'yes, same sha-256' : 'NO', tone: matches ? 'ok' : 'bad' },
+              ]}
+            />
+            <div className="note">
+              {String(live.disclosure ?? '')}{' '}
+              {live.fell_back
+                ? 'The GPU worker was unreachable, so this fell back to the recorded run, labeled honestly.'
+                : 'You just ran the reconstruction yourself, on the exact vector the console shows.'}
+            </div>
+          </>
+        )}
+      </div>
+    )
+  }
+
   function stageResult(id: StageId) {
     switch (id) {
       case 'memory':
@@ -161,6 +225,7 @@ export function DemoConsole() {
                 {String(state.inversion.disclosure ?? '')} The name is reconstructed from the embedding
                 alone, so deleting the row is not enough.
               </div>
+              {liveLeakPanel()}
             </>
           )
         )

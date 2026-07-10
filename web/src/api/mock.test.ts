@@ -45,4 +45,15 @@ describe('mock client', () => {
     // b never ingested, so it has no subject.
     await expect(b.getMemory('x')).rejects.toBeInstanceOf(ApiError)
   })
+
+  it('reports live inversion unavailable and falls back honestly', async () => {
+    const api = createMockClient()
+    expect((await api.getInversionConfig()).live_available).toBe(false)
+    // A 3072-byte embedding: the mock echoes the honest fallback shape with a real input hash.
+    const emb = btoa(String.fromCharCode(...new Uint8Array(3072)))
+    const live = await api.liveInversion(emb)
+    expect(live.source).toBe('recorded_golden_run')
+    expect(live.fell_back).toBe(true)
+    expect(live.input_sha256).toMatch(/^[0-9a-f]{64}$/)
+  })
 })

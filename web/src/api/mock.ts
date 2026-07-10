@@ -9,7 +9,9 @@ import {
   type DecisionRow,
   type DemoApi,
   type EraseResponse,
+  type InversionConfig,
   type InversionGoldenRun,
+  type LiveInversion,
   type MemoryView,
   type ProofView,
   type RbacResult,
@@ -102,6 +104,29 @@ export function createMockClient(): DemoApi {
     },
     async getInversion() {
       return goldenRun()
+    },
+    async getInversionConfig(): Promise<InversionConfig> {
+      // The mock has no GPU worker; advertise live as unavailable so the UI shows the recorded
+      // path. A real deploy with MODAL_INVERT_* set flips this to true.
+      return { live_available: false }
+    },
+    async liveInversion(embeddingB64: string): Promise<LiveInversion> {
+      // No GPU in the mock: mirror cryptod's honest fallback shape so the UI code path is exercised.
+      const digest = await crypto.subtle.digest(
+        'SHA-256',
+        Uint8Array.from(atob(embeddingB64), (c) => c.charCodeAt(0)),
+      )
+      const inputSha = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join(
+        '',
+      )
+      return {
+        source: 'recorded_golden_run',
+        recovered_text: DEMO_SENTENCE + ' ',
+        disclosure: goldenRun().disclosure as string,
+        input_sha256: inputSha,
+        fell_back: true,
+        fallback_reason: 'mock has no GPU worker',
+      }
     },
     async erase() {
       requireSubject()

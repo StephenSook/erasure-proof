@@ -397,6 +397,26 @@ button {
   color: var(--bad);
 }
 
+/* Live GPU inversion panel: the "run the attack yourself" beat under the recorded run. */
+.live-leak {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.live-leak__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.btn--small {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
 /* LCD instrument strip (DSEG faces; the ghost span is the unlit segments underlay) */
 .lcd-strip {
   display: flex;

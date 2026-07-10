@@ -8,7 +8,9 @@ import {
   type DemoApi,
   type EraseResponse,
   type IngestResult,
+  type InversionConfig,
   type InversionGoldenRun,
+  type LiveInversion,
   type MemoryView,
   type ProofView,
   type RbacResult,
@@ -57,6 +59,12 @@ export function createHttpClient(base = ''): DemoApi {
     },
     getInversion() {
       return request<InversionGoldenRun>(b, 'GET', '/api/inversion')
+    },
+    getInversionConfig() {
+      return request<InversionConfig>(b, 'GET', '/api/inversion/config')
+    },
+    liveInversion(embeddingB64) {
+      return request<LiveInversion>(b, 'POST', '/api/inversion/live', { embedding: embeddingB64 })
     },
     erase(subjectId, lawfulBasis = 'gdpr_art_17') {
       return request<EraseResponse>(b, 'POST', '/erase', {

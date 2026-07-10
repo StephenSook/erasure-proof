@@ -6,6 +6,7 @@ import {
   type EraseResponse,
   getClient,
   type InversionGoldenRun,
+  type LiveInversion,
   type MemoryView,
   type ProofView,
   type RbacResult,
@@ -18,6 +19,11 @@ export interface DemoState {
   memory?: MemoryView // after stage 1 (and refreshed by stage 3)
   memoryAfter?: MemoryView // after erasure (embedding + key gone)
   inversion?: InversionGoldenRun
+  // Live GPU inversion of the demo embedding: the "run the attack yourself" beat.
+  liveInversion?: LiveInversion
+  liveStatus: 'idle' | 'running' | 'done' | 'error'
+  liveError?: string
+  liveAvailable?: boolean
   erase?: EraseResponse
   proof?: ProofView
   decisionLog?: DecisionRow[]
@@ -39,6 +45,7 @@ const zeroSeq = (): Record<StageId, number> =>
 
 const initialState = (): DemoState => ({
   subjectId: '',
+  liveStatus: 'idle',
   status: idleStatus(),
   error: {},
   doneSeq: zeroSeq(),
@@ -105,6 +112,32 @@ export function useDemo(injected?: DemoApi) {
     [step],
   )
 
+  // Probe whether a live GPU worker is wired so the UI shows the live button only when it can run.
+  const checkLive = useCallback(async () => {
+    try {
+      const cfg = await clientRef.current!.getInversionConfig()
+      setState((s) => ({ ...s, liveAvailable: cfg.live_available }))
+    } catch {
+      setState((s) => ({ ...s, liveAvailable: false }))
+    }
+  }, [])
+
+  // Run the attack live on a real GPU, on the exact demo embedding shown. cryptod falls back to the
+  // recorded run if the worker is down, so the returned source label always states which path ran.
+  const runLiveLeak = useCallback(async () => {
+    setState((s) => ({ ...s, liveStatus: 'running', liveError: undefined }))
+    try {
+      const live = await clientRef.current!.liveInversion(demoMemory.embeddingB64)
+      setState((s) => ({ ...s, liveInversion: live, liveStatus: 'done' }))
+    } catch (e) {
+      setState((s) => ({
+        ...s,
+        liveStatus: 'error',
+        liveError: e instanceof Error ? e.message : String(e),
+      }))
+    }
+  }, [])
+
   const runEnvelope = useCallback(
     () => step('envelope', async (c) => ({ memory: await c.getMemory(requireSubject()) })),
     [step, requireSubject],
@@ -158,8 +191,30 @@ export function useDemo(injected?: DemoApi) {
   }, [injected])
 
   const actions = useMemo(
-    () => ({ runMemory, runLeak, runEnvelope, runErase, runDurability, runAudit, runAll, reset }),
-    [runMemory, runLeak, runEnvelope, runErase, runDurability, runAudit, runAll, reset],
+    () => ({
+      runMemory,
+      runLeak,
+      checkLive,
+      runLiveLeak,
+      runEnvelope,
+      runErase,
+      runDurability,
+      runAudit,
+      runAll,
+      reset,
+    }),
+    [
+      runMemory,
+      runLeak,
+      checkLive,
+      runLiveLeak,
+      runEnvelope,
+      runErase,
+      runDurability,
+      runAudit,
+      runAll,
+      reset,
+    ],
   )
 
   return { state, actions }
