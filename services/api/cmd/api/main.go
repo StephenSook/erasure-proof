@@ -19,6 +19,7 @@ import (
 	"github.com/StephenSook/erasure-proof/services/api/internal/httpapi"
 	"github.com/StephenSook/erasure-proof/services/api/internal/ingest"
 	"github.com/StephenSook/erasure-proof/services/api/internal/store"
+	"github.com/StephenSook/erasure-proof/services/api/internal/stream"
 )
 
 func main() {
@@ -68,6 +69,20 @@ func main() {
 	}
 
 	srv := httpapi.New(st, orch, ingester, demoSvc, os.Getenv("GIT_SHA"))
+
+	// Live decision-log changefeed -> SSE. The consumer opens its OWN dedicated connection (not the
+	// operator pool) so the always-on feed never subtracts a connection from the erasure/read paths.
+	// If rangefeeds are disabled the feed just retries and the stream serves the snapshot only.
+	// Disable entirely with STREAM_CHANGEFEED=0. Cancelled on shutdown so the connection is closed.
+	streamCtx, streamCancel := context.WithCancel(context.Background())
+	defer streamCancel()
+	if os.Getenv("STREAM_CHANGEFEED") != "0" {
+		hub := stream.NewHub(64, 32)
+		srv.SetStreamHub(hub)
+		consumer := stream.NewConsumer(cfg.OperatorDSN, hub)
+		go consumer.Run(streamCtx)
+		log.Print("live decision-log changefeed stream enabled")
+	}
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           srv.Routes(),
@@ -86,6 +101,7 @@ func main() {
 
 	<-ctx.Done()
 	log.Print("shutting down")
+	streamCancel() // stop the changefeed consumer and close its dedicated connection
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {

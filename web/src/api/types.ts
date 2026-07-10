@@ -195,4 +195,13 @@ export interface DemoApi {
   getTreeHead(): Promise<TreeHead>
   getInclusion(seq: number, treeSize?: number): Promise<InclusionView>
   getConsistency(from: number, to?: number): Promise<ConsistencyView>
+  subscribeErasureStream(handlers: StreamHandlers): () => void
+}
+
+// StreamHandlers receive the live decision-log feed: a snapshot of the current log on connect
+// (live=true when a real CockroachDB changefeed backs the stream), then each newly appended row.
+export interface StreamHandlers {
+  onSnapshot: (rows: DecisionRow[], live: boolean) => void
+  onRow: (row: DecisionRow) => void
+  onError?: (message: string) => void
 }
