@@ -49,6 +49,36 @@ jobs:
       - name: Tests (pytest + hypothesis)
         run: uv run pytest -q
 
+  go-api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - name: Vet
+        run: go vet ./...
+      - name: Build
+        run: go build ./...
+      - name: Start CockroachDB for the integration test
+        run: |
+          docker run -d --name crdb -p 26257:26257 \
+            cockroachdb/cockroach:latest-v25.2 start-single-node --insecure
+          for i in $(seq 1 40); do
+            if docker exec crdb ./cockroach sql --insecure -e "SELECT 1" >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          docker exec crdb ./cockroach sql --insecure -e "CREATE DATABASE erasure_test"
+      - name: Tests (with the erasure integration + retry-injection tests)
+        env:
+          CRDB_DSN_TEST: postgresql://root@localhost:26257/erasure_test?sslmode=disable
+        run: go test -race ./...
+
   db-smoke:
     runs-on: ubuntu-latest
     steps:
