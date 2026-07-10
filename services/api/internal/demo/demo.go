@@ -79,6 +79,8 @@ type Service struct {
 	// audits (one at a time) since Bedrock's new-account token quota is low.
 	forensicsConverser agent.Converser
 	forensicsSem       chan struct{}
+	forensicsMu        sync.Mutex
+	forensicsHits      []time.Time
 }
 
 // New builds the demo Service.
@@ -107,8 +109,18 @@ var ErrForensicsUnavailable = errors.New("forensics agent unavailable")
 // ErrForensicsBusy means a live audit is already running (quota guard).
 var ErrForensicsBusy = errors.New("forensics agent busy")
 
+// ErrForensicsBudget means the rolling-hour forensics-audit budget is exhausted (quota guard).
+var ErrForensicsBudget = errors.New("forensics agent hourly budget exhausted")
+
+// forensicsMaxPerHour bounds how many live audits this process runs per rolling hour, so back-to-back
+// clicks cannot drain the low new-account Bedrock token quota. Each audit is up to five Converse
+// calls; 30/hour keeps the sustained draw modest.
+const forensicsMaxPerHour = 30
+
 // ForensicsAudit runs the live Bedrock forensics agent over subjectID and returns the verdict and
-// its full tool-call trace. One audit runs at a time (Bedrock token quota).
+// its full tool-call trace. One audit runs at a time (concurrency), bounded per rolling hour
+// (sustained spend). Source and Disclosure mark the result as live; EvidenceProven is the server's
+// own read of the trace so the UI never tones a PROVEN headline the tools did not support.
 func (s *Service) ForensicsAudit(ctx context.Context, subjectID string) (agent.AuditResult, error) {
 	if s.forensicsConverser == nil {
 		return agent.AuditResult{}, ErrForensicsUnavailable
@@ -119,8 +131,42 @@ func (s *Service) ForensicsAudit(ctx context.Context, subjectID string) (agent.A
 	default:
 		return agent.AuditResult{}, ErrForensicsBusy
 	}
+	if !s.allowForensics() {
+		return agent.AuditResult{}, ErrForensicsBudget
+	}
 	ag := agent.NewForensicsAgent(s.forensicsConverser, s.ForensicsToolset(), 4)
-	return ag.Audit(ctx, subjectID)
+	res, err := ag.Audit(ctx, subjectID)
+	if err != nil {
+		return agent.AuditResult{}, err
+	}
+	res.Source = "live_bedrock"
+	res.Disclosure = "Live Claude (Bedrock) tool-use audit. The verdict cites only what the " +
+		"read-only tools returned; evidence_proven is our own check of the trace."
+	return res, nil
+}
+
+// allowForensics records a live-audit attempt and reports whether it is within the rolling-hour
+// budget, pruning stale timestamps on each call.
+func (s *Service) allowForensics() bool {
+	s.forensicsMu.Lock()
+	defer s.forensicsMu.Unlock()
+	nowFn := s.now
+	if nowFn == nil {
+		nowFn = time.Now
+	}
+	cutoff := nowFn().Add(-time.Hour)
+	kept := s.forensicsHits[:0]
+	for _, t := range s.forensicsHits {
+		if t.After(cutoff) {
+			kept = append(kept, t)
+		}
+	}
+	s.forensicsHits = kept
+	if len(s.forensicsHits) >= forensicsMaxPerHour {
+		return false
+	}
+	s.forensicsHits = append(s.forensicsHits, nowFn())
+	return true
 }
 
 // allowLiveInvert records a live-inversion attempt and reports whether it is within the rolling

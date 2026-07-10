@@ -84,11 +84,39 @@ type ToolCall struct {
 	Output map[string]any `json:"output"`
 }
 
-// AuditResult is the agent's verdict plus its full evidence trace.
+// AuditResult is the agent's verdict plus its full evidence trace. Source and Disclosure are set by
+// the caller (live vs mock). EvidenceProven is computed server-side from the actual tool outputs,
+// NOT from the model's free text, so the UI can tone the verdict on evidence and flag any case where
+// the model's words disagree with what the tools returned.
 type AuditResult struct {
-	Verdict   string     `json:"verdict"`
-	ToolCalls []ToolCall `json:"tool_calls"`
-	Rounds    int        `json:"rounds"`
+	Verdict        string     `json:"verdict"`
+	ToolCalls      []ToolCall `json:"tool_calls"`
+	Rounds         int        `json:"rounds"`
+	Source         string     `json:"source,omitempty"`
+	Disclosure     string     `json:"disclosure,omitempty"`
+	EvidenceProven bool       `json:"evidence_proven"`
+}
+
+// EvidenceProven reports whether the tool trace actually supports a PROVEN verdict: the last
+// confirm_key_destroyed call must show destroyed=true (key row gone AND erasure recorded), and if
+// the hash chain was checked it must be intact. This is the server's own read of the evidence,
+// independent of whatever text the model produced.
+func EvidenceProven(calls []ToolCall) bool {
+	destroyed := false
+	seenDestroyed := false
+	chainOK := true // not-checked does not block; a checked-and-broken chain does
+	for _, c := range calls {
+		switch c.Name {
+		case "confirm_key_destroyed":
+			seenDestroyed = true
+			destroyed, _ = c.Output["destroyed"].(bool)
+		case "verify_hash_chain":
+			if intact, ok := c.Output["intact"].(bool); ok {
+				chainOK = intact
+			}
+		}
+	}
+	return seenDestroyed && destroyed && chainOK
 }
 
 const auditSystem = "You are a forensic auditor for an erasure-proof system. Decide whether a data " +
@@ -157,7 +185,10 @@ func (a *ForensicsAgent) Audit(ctx context.Context, subjectID string) (AuditResu
 		messages = append(messages, res.Assistant)
 
 		if res.StopReason != "tool_use" || len(res.ToolUses) == 0 {
-			return AuditResult{Verdict: res.Text, ToolCalls: calls, Rounds: round + 1}, nil
+			return AuditResult{
+				Verdict: res.Text, ToolCalls: calls, Rounds: round + 1,
+				EvidenceProven: EvidenceProven(calls),
+			}, nil
 		}
 
 		results := make([]Block, 0, len(res.ToolUses))
@@ -175,7 +206,10 @@ func (a *ForensicsAgent) Audit(ctx context.Context, subjectID string) (AuditResu
 	if err != nil {
 		return AuditResult{}, fmt.Errorf("final converse: %w", err)
 	}
-	return AuditResult{Verdict: final.Text, ToolCalls: calls, Rounds: a.maxRounds}, nil
+	return AuditResult{
+		Verdict: final.Text, ToolCalls: calls, Rounds: a.maxRounds,
+		EvidenceProven: EvidenceProven(calls),
+	}, nil
 }
 
 // dispatch runs one tool. A tool error is returned to the model as evidence (and recorded in the

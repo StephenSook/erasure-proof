@@ -370,6 +370,12 @@ func (s *Server) handleAgentForensics(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if errors.Is(err, demo.ErrForensicsBudget) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "the forensics-audit hourly budget is used up; try again later",
+		})
+		return
+	}
 	if err != nil {
 		log.Printf("httpapi: forensics audit failed: %v", err)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "forensics audit failed"})

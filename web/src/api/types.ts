@@ -133,6 +133,9 @@ export interface ForensicsAudit {
   rounds: number
   source?: string
   disclosure?: string
+  // The server's own read of the tool trace (NOT the model's text), so the UI tones the verdict on
+  // evidence and flags any case where the model's wording disagrees with what the tools returned.
+  evidence_proven: boolean
 }
 
 export interface DemoApi {

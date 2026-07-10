@@ -80,6 +80,42 @@ func TestAudit_GathersEvidenceThenVerdict(t *testing.T) {
 	if res.ToolCalls[0].Output["destroyed"] != true {
 		t.Errorf("first tool output = %v, want the real evidence", res.ToolCalls[0].Output)
 	}
+	// The server's evidence read backs the PROVEN verdict (destroyed + chain intact).
+	if !res.EvidenceProven {
+		t.Error("EvidenceProven should be true when the tools show destroyed + intact chain")
+	}
+}
+
+func TestEvidenceProven_IgnoresModelTextAndCatchesUnsupportedProven(t *testing.T) {
+	// The model claims PROVEN, but confirm_key_destroyed shows destroyed=false: EvidenceProven must
+	// be false so the UI never tones an unsupported PROVEN green.
+	tu := agent.ToolUse{ID: "t", Name: "confirm_key_destroyed", Input: map[string]any{"subject_id": "s"}}
+	conv := &fakeConverser{steps: []agent.Result{
+		{StopReason: "tool_use", ToolUses: []agent.ToolUse{tu},
+			Assistant: agent.Message{Role: agent.RoleAssistant, Blocks: []agent.Block{{ToolUse: &tu}}}},
+		{StopReason: "end_turn", Text: "VERDICT: PROVEN (unsupported by the tools)."},
+	}}
+	tools := notDestroyedTools{}
+	res, err := agent.NewForensicsAgent(conv, tools, 4).Audit(context.Background(), "s")
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if res.EvidenceProven {
+		t.Error("EvidenceProven must be false when destroyed=false, regardless of the model's PROVEN text")
+	}
+}
+
+// notDestroyedTools reports the key still present (destroyed=false) for the unsupported-PROVEN test.
+type notDestroyedTools struct{}
+
+func (notDestroyedTools) VerifyHashChain(context.Context) map[string]any {
+	return map[string]any{"intact": true}
+}
+func (notDestroyedTools) CheckErasureProof(context.Context, string) map[string]any {
+	return map[string]any{"erasure_recorded": false}
+}
+func (notDestroyedTools) ConfirmKeyDestroyed(context.Context, string) map[string]any {
+	return map[string]any{"destroyed": false}
 }
 
 func TestAudit_ForcesVerdictWhenToolRoundsExhausted(t *testing.T) {

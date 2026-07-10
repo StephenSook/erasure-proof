@@ -145,6 +145,7 @@ export function createMockClient(): DemoApi {
         disclosure:
           'Recorded verdict (the mock has no Bedrock). With AGENTS_LIVE=1 the real Claude agent runs live and returns this with its own reasoning.',
         rounds: 2,
+        evidence_proven: destroyed,
         verdict: destroyed
           ? 'VERDICT: PROVEN the subject key row is gone, the erasure is recorded, and the decision-log hash chain is intact.'
           : 'VERDICT: NOT PROVEN the subject still has its key row; no erasure has been recorded yet.',

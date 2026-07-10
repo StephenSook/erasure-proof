@@ -344,7 +344,11 @@ export function DemoConsole() {
 
   function forensicsAgentPanel() {
     const audit = state.agentAudit
-    const proven = audit?.verdict?.startsWith('VERDICT: PROVEN')
+    // Tone on the SERVER'S read of the evidence, never the model's free text. If the model's wording
+    // and the evidence disagree, the evidence is authoritative and we say so.
+    const provenByEvidence = audit?.evidence_proven === true
+    const provenByText = audit?.verdict?.startsWith('VERDICT: PROVEN') ?? false
+    const disagree = audit != null && provenByText !== provenByEvidence
     return (
       <div className="live-leak">
         <div className="live-leak__head">
@@ -372,24 +376,34 @@ export function DemoConsole() {
           <>
             <KeyValue
               items={[
-                { k: 'verdict', v: String(audit.verdict ?? ''), tone: proven ? 'ok' : 'bad' },
+                { k: 'verdict', v: String(audit.verdict ?? ''), tone: provenByEvidence ? 'ok' : 'bad' },
+                { k: 'evidence proves erasure', v: provenByEvidence ? 'yes' : 'no', tone: provenByEvidence ? 'ok' : 'bad' },
                 { k: 'source', v: audit.source === 'live_bedrock' ? 'live Claude on Bedrock' : 'recorded (agent not wired)', tone: audit.source === 'live_bedrock' ? 'ok' : undefined },
                 { k: 'rounds', v: String(audit.rounds ?? '') },
               ]}
             />
+            {disagree && (
+              <div className="note note--error">
+                The agent&apos;s wording and the tool evidence disagree. The evidence is
+                authoritative: this erasure is {provenByEvidence ? 'proven' : 'NOT proven'} by what
+                the read-only tools returned.
+              </div>
+            )}
             {audit.tool_calls && audit.tool_calls.length > 0 && (
               <div className="agent-trace">
                 {audit.tool_calls.map((c, i) => (
                   <div className="agent-trace__row" key={`${c.name}-${i}`}>
-                    <div className="agent-trace__tool">{c.name}</div>
+                    <div className="agent-trace__tool">
+                      {c.name}({JSON.stringify(c.input)})
+                    </div>
                     <CodeBlock>{JSON.stringify(c.output)}</CodeBlock>
                   </div>
                 ))}
               </div>
             )}
             <div className="note">
-              {String(audit.disclosure ?? '')} The verdict cites only what the read-only tools
-              returned; the trace above is the agent's actual evidence.
+              {String(audit.disclosure ?? '')} The verdict is toned by our own check of the trace,
+              not the model&apos;s wording; the trace above is the agent&apos;s actual evidence.
             </div>
           </>
         )}
