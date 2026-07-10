@@ -89,15 +89,25 @@ class KMS:
     def destroy_imported_key(self, key_id: str, timeout_s: float = 10.0) -> str:
         """DeleteImportedKeyMaterial, then poll DescribeKey until KeyState=PendingImport.
 
-        Returns the observed key state. The poll accounts for KMS eventual consistency, so the
-        caller can report an observed-immediate kill rather than assuming it.
+        The delete call is the destructive operation: if IT raises, that propagates (a real
+        failure). Once it succeeds the material is gone; only the confirmation is eventually
+        consistent. So the confirmation poll's DescribeKey reads are guarded, and if we cannot
+        confirm within the timeout we return "Unconfirmed" (delete succeeded, state not yet
+        observed) rather than letting a read-side error masquerade as a destroy failure. The caller
+        must treat "PendingImport" as destroyed and anything else as pending confirmation, never as
+        "not destroyed".
         """
-        self._kms.delete_imported_key_material(KeyId=key_id)
+        self._kms.delete_imported_key_material(KeyId=key_id)  # destructive; propagate on error
         deadline = time.monotonic() + timeout_s
-        state = self.key_state(key_id)
-        while state != "PendingImport" and time.monotonic() < deadline:
+        state = "Unconfirmed"
+        while time.monotonic() < deadline:
+            try:
+                state = self.key_state(key_id)
+            except Exception:  # noqa: BLE001 -- a read error after a successful delete is not a failure
+                state = "Unconfirmed"
+            if state == "PendingImport":
+                return state
             time.sleep(0.25)
-            state = self.key_state(key_id)
         return state
 
     def key_state(self, key_id: str) -> str:
