@@ -48,6 +48,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/rbac-demo", s.handleDemoRbac)
 	mux.HandleFunc("GET /api/tree-head", s.handleDemoTreeHead)
 	mux.HandleFunc("GET /api/inclusion", s.handleDemoInclusion)
+	mux.HandleFunc("GET /api/agent/config", s.handleAgentConfig)
+	mux.HandleFunc("POST /api/agent/forensics", s.handleAgentForensics)
 	return mux
 }
 
@@ -340,4 +342,38 @@ func (s *Server) handleDemoInversionLive(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
+}
+
+func (s *Server) handleAgentConfig(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"live_available": s.demo.ForensicsAvailable()})
+}
+
+func (s *Server) handleAgentForensics(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SubjectID string `json:"subject_id"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil || req.SubjectID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "subject_id is required"})
+		return
+	}
+	// The tool-use loop makes several Bedrock calls; give it a generous budget but bounded.
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	defer cancel()
+	res, err := s.demo.ForensicsAudit(ctx, req.SubjectID)
+	if errors.Is(err, demo.ErrForensicsUnavailable) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "forensics agent not wired"})
+		return
+	}
+	if errors.Is(err, demo.ErrForensicsBusy) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "the forensics agent is already running an audit; try again in a moment",
+		})
+		return
+	}
+	if err != nil {
+		log.Printf("httpapi: forensics audit failed: %v", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "forensics audit failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }

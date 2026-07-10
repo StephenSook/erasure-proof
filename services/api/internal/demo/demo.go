@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/StephenSook/erasure-proof/services/api/internal/agent"
 	"github.com/StephenSook/erasure-proof/services/api/internal/chain"
 	"github.com/StephenSook/erasure-proof/services/api/internal/merkle"
 	"github.com/StephenSook/erasure-proof/services/api/internal/store"
@@ -73,6 +74,11 @@ type Service struct {
 	liveInvertHits []time.Time
 	// now is injectable so the rate-limit test does not depend on wall-clock time.
 	now func() time.Time
+	// forensicsConverser is the Bedrock client for the on-screen forensics agent; nil when Bedrock
+	// is not wired, so the UI shows the recorded/mock verdict instead. forensicsSem serializes live
+	// audits (one at a time) since Bedrock's new-account token quota is low.
+	forensicsConverser agent.Converser
+	forensicsSem       chan struct{}
 }
 
 // New builds the demo Service.
@@ -84,7 +90,37 @@ func New(s *store.Store, inverter Inverter) *Service {
 		inverter:      inverter,
 		liveInvertSem: make(chan struct{}, 2),
 		now:           time.Now,
+		forensicsSem:  make(chan struct{}, 1),
 	}
+}
+
+// SetForensicsConverser wires the live Bedrock forensics agent. Called at boot only when Bedrock is
+// configured; leaving it unset keeps the live agent unavailable (the UI falls back honestly).
+func (s *Service) SetForensicsConverser(c agent.Converser) { s.forensicsConverser = c }
+
+// ForensicsAvailable reports whether the live agent can run (drives the UI button).
+func (s *Service) ForensicsAvailable() bool { return s.forensicsConverser != nil }
+
+// ErrForensicsUnavailable means no Bedrock converser is wired.
+var ErrForensicsUnavailable = errors.New("forensics agent unavailable")
+
+// ErrForensicsBusy means a live audit is already running (quota guard).
+var ErrForensicsBusy = errors.New("forensics agent busy")
+
+// ForensicsAudit runs the live Bedrock forensics agent over subjectID and returns the verdict and
+// its full tool-call trace. One audit runs at a time (Bedrock token quota).
+func (s *Service) ForensicsAudit(ctx context.Context, subjectID string) (agent.AuditResult, error) {
+	if s.forensicsConverser == nil {
+		return agent.AuditResult{}, ErrForensicsUnavailable
+	}
+	select {
+	case s.forensicsSem <- struct{}{}:
+		defer func() { <-s.forensicsSem }()
+	default:
+		return agent.AuditResult{}, ErrForensicsBusy
+	}
+	ag := agent.NewForensicsAgent(s.forensicsConverser, s.ForensicsToolset(), 4)
+	return ag.Audit(ctx, subjectID)
 }
 
 // allowLiveInvert records a live-inversion attempt and reports whether it is within the rolling
