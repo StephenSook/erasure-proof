@@ -19,6 +19,8 @@ class Settings:
     # Defaulted so the live path is purely additive to existing configs.
     modal_invert_url: str = ""
     modal_invert_secret: str = ""
+    # Live GTR embedding (Modal, same worker/secret) for the agent memory-writer.
+    modal_embed_url: str = ""
 
 
 def load() -> Settings:
@@ -33,4 +35,5 @@ def load() -> Settings:
         ecdsa_signing_key_path=os.getenv("ECDSA_SIGNING_KEY_PATH", ""),
         modal_invert_url=os.getenv("MODAL_INVERT_URL", ""),
         modal_invert_secret=os.getenv("MODAL_INVERT_SECRET", ""),
+        modal_embed_url=os.getenv("MODAL_EMBED_URL", ""),
     )

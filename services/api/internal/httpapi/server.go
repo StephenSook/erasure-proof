@@ -3,11 +3,13 @@ package httpapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/StephenSook/erasure-proof/services/api/internal/demo"
@@ -50,6 +52,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/inclusion", s.handleDemoInclusion)
 	mux.HandleFunc("GET /api/agent/config", s.handleAgentConfig)
 	mux.HandleFunc("POST /api/agent/forensics", s.handleAgentForensics)
+	mux.HandleFunc("POST /api/agent/memory-writer", s.handleAgentMemoryWriter)
 	return mux
 }
 
@@ -345,7 +348,58 @@ func (s *Server) handleDemoInversionLive(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleAgentConfig(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"live_available": s.demo.ForensicsAvailable()})
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	forensics := s.demo.ForensicsAvailable()
+	// The memory-writer needs Bedrock (distil) AND the embedding worker; probe the latter only when
+	// Bedrock is wired, to avoid a needless cryptod call in the common unwired case.
+	memWriter := forensics && s.demo.EmbedAvailable(ctx)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"live_available":          forensics,
+		"forensics_available":     forensics,
+		"memory_writer_available": memWriter,
+	})
+}
+
+func (s *Server) handleAgentMemoryWriter(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Turn string `json:"turn"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil || strings.TrimSpace(req.Turn) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a conversation turn is required"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 240*time.Second)
+	defer cancel()
+
+	fact, embeddingB64, err := s.demo.DistillAndEmbed(ctx, req.Turn)
+	if errors.Is(err, demo.ErrMemoryWriterUnavailable) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "memory writer not wired"})
+		return
+	}
+	if errors.Is(err, demo.ErrForensicsBusy) || errors.Is(err, demo.ErrForensicsBudget) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "the agent is busy or over budget; try again shortly"})
+		return
+	}
+	if err != nil {
+		log.Printf("httpapi: memory writer distil/embed failed: %v", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "memory writer failed"})
+		return
+	}
+
+	// Store the agent-written memory through the normal ingest path (new subject).
+	res, err := s.ingester.Ingest(ctx, "", base64.StdEncoding.EncodeToString([]byte(fact)), embeddingB64)
+	if err != nil {
+		log.Printf("httpapi: memory writer ingest failed: %v", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "storing the memory failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"source":      "live_bedrock",
+		"memory_text": fact,
+		"subject_id":  res.SubjectID,
+		"memory_id":   res.MemoryID,
+	})
 }
 
 func (s *Server) handleAgentForensics(w http.ResponseWriter, r *http.Request) {

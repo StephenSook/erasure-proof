@@ -54,6 +54,16 @@ func (s stubInverter) InvertConfig(context.Context) (map[string]any, error) {
 	return map[string]any{"live_available": true}, nil
 }
 
+func (s stubInverter) EmbedLive(_ context.Context, text string) (map[string]any, error) {
+	// A deterministic 3072-byte vector derived from the text length, so tests can assert a store.
+	emb := bytesRepeat(byte(len(text)%256), 3072)
+	return map[string]any{"embedding_b64": base64.StdEncoding.EncodeToString(emb), "echo_text": text}, nil
+}
+
+func (s stubInverter) EmbedConfig(context.Context) (map[string]any, error) {
+	return map[string]any{"embed_available": true}, nil
+}
+
 // setup runs the demo tests in their OWN database (erasure_demo_test) so the global decision-log
 // chain and the TRUNCATE here never collide with the erasure/ingest tests that share CRDB_DSN_TEST.
 // It applies the schema, truncates the four tables, and returns a store plus an admin pool.

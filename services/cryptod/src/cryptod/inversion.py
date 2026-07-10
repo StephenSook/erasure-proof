@@ -113,3 +113,41 @@ def live_inversion(
         "shown. The live proof of erasure remains the AES-GCM InvalidTag failure."
     )
     return body
+
+
+class LiveEmbedUnavailable(RuntimeError):
+    """The Modal embed worker is not configured or did not answer."""
+
+
+def live_embed(text: str, *, modal_url: str, modal_secret: str, timeout_s: float = 200.0) -> dict:
+    """Embed text on the Modal GPU worker (the canonical GTR pipeline), for the live memory-writer.
+
+    Returns {"embedding_b64", "sha256", "dims", "device"}. Raises LiveEmbedUnavailable on any
+    misconfiguration or transport/HTTP failure so the caller can report the writer unavailable
+    rather than storing an unusable memory.
+    """
+    if not modal_url or not modal_secret:
+        raise LiveEmbedUnavailable("MODAL_EMBED_URL / MODAL_INVERT_SECRET not configured")
+    text = text.strip()
+    if not text:
+        raise LiveEmbedUnavailable("empty text")
+
+    payload = json.dumps({"secret": modal_secret, "text": text}).encode()
+    req = urllib.request.Request(  # noqa: S310 (fixed https Modal URL, not user-controlled)
+        modal_url, data=payload, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:  # noqa: S310
+            body = json.loads(resp.read().decode())
+    except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+        raise LiveEmbedUnavailable(f"modal embed call failed: {exc}") from exc
+
+    emb = body.get("embedding_b64")
+    if not emb:
+        raise LiveEmbedUnavailable("modal embed returned no embedding")
+    try:
+        if len(base64.b64decode(emb, validate=True)) != 768 * 4:
+            raise LiveEmbedUnavailable("modal embed returned a non-3072-byte vector")
+    except Exception as exc:  # noqa: BLE001
+        raise LiveEmbedUnavailable(f"modal embed returned bad base64: {exc}") from exc
+    return body

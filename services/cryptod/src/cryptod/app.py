@@ -80,6 +80,10 @@ class LiveInvertRequest(BaseModel):
     sequence_beam_width: int = 8
 
 
+class EmbedRequest(BaseModel):
+    text: str  # the fact to embed (canonical GTR pipeline, on the Modal GPU)
+
+
 def _load_signer(cfg: settings.Settings) -> ec.EllipticCurvePrivateKey:
     if cfg.ecdsa_signing_key_path:
         with open(cfg.ecdsa_signing_key_path, "rb") as f:
@@ -124,6 +128,21 @@ def create_app(cfg: settings.Settings | None = None) -> FastAPI:
     def invert_config() -> dict:
         """Whether live GPU inversion is available, so the UI can show or hide the live button."""
         return {"live_available": bool(cfg.modal_invert_url and cfg.modal_invert_secret)}
+
+    @app.get("/embed/config")
+    def embed_config() -> dict:
+        """Whether live GTR embedding is available (drives the agent memory-writer)."""
+        return {"embed_available": bool(cfg.modal_embed_url and cfg.modal_invert_secret)}
+
+    @app.post("/embed/live")
+    def embed_live(req: EmbedRequest) -> dict:
+        """Embed a fact on the Modal GPU (canonical GTR pipeline) for the live memory-writer."""
+        try:
+            return inversion.live_embed(
+                req.text, modal_url=cfg.modal_embed_url, modal_secret=cfg.modal_invert_secret
+            )
+        except inversion.LiveEmbedUnavailable as exc:
+            raise HTTPException(503, f"live embedding unavailable: {exc}") from exc
 
     @app.post("/invert/live")
     def invert_live(req: LiveInvertRequest) -> dict:

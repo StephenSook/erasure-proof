@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,11 +47,13 @@ var ErrNotFound = errors.New("not found")
 const insufficientPrivilege = "42501"
 
 // Inverter is the narrow slice of the crypto client the demo needs: the recorded golden run, the
-// live GPU inversion, and the availability probe.
+// live GPU inversion, the live GTR embedding (for the memory-writer), and the availability probes.
 type Inverter interface {
 	Invert(ctx context.Context) (map[string]any, error)
 	InvertLive(ctx context.Context, embeddingB64 string) (map[string]any, error)
 	InvertConfig(ctx context.Context) (map[string]any, error)
+	EmbedLive(ctx context.Context, text string) (map[string]any, error)
+	EmbedConfig(ctx context.Context) (map[string]any, error)
 }
 
 // liveInvertMaxPerHour caps how many live GPU inversions this process will start per rolling hour,
@@ -145,8 +148,65 @@ func (s *Service) ForensicsAudit(ctx context.Context, subjectID string) (agent.A
 	return res, nil
 }
 
-// allowForensics records a live-audit attempt and reports whether it is within the rolling-hour
-// budget, pruning stale timestamps on each call.
+// distillSystem is the memory-writer prompt: Claude reads a conversation turn and returns the one
+// durable fact worth remembering, which is then embedded and stored (the same behaviour as the
+// tested Python MemoryWriter).
+const distillSystem = "You are the memory-writing step of an AI agent. Read the user's message and " +
+	"reply with ONE concise sentence stating the single durable fact about the person that is worth " +
+	"remembering. Reply with only that sentence: no preamble, no quotes, no explanation."
+
+// ErrMemoryWriterUnavailable means Bedrock or the embedding worker is not wired.
+var ErrMemoryWriterUnavailable = errors.New("memory writer unavailable")
+
+// EmbedAvailable reports whether cryptod has a live GTR embedding worker (network probe).
+func (s *Service) EmbedAvailable(ctx context.Context) bool {
+	cfg, err := s.inverter.EmbedConfig(ctx)
+	if err != nil {
+		return false
+	}
+	ok, _ := cfg["embed_available"].(bool)
+	return ok
+}
+
+// DistillAndEmbed runs the live memory-writer's first two steps: Claude distils the durable fact
+// from a conversation turn, then the fact is embedded on the GPU (canonical GTR pipeline). The
+// caller stores the result through the normal ingest path. Returns the fact and its base64
+// embedding. Guarded by the shared agent semaphore + hourly budget (Bedrock + GPU token quota).
+func (s *Service) DistillAndEmbed(ctx context.Context, turn string) (string, string, error) {
+	if s.forensicsConverser == nil {
+		return "", "", ErrMemoryWriterUnavailable
+	}
+	select {
+	case s.forensicsSem <- struct{}{}:
+		defer func() { <-s.forensicsSem }()
+	default:
+		return "", "", ErrForensicsBusy
+	}
+	if !s.allowForensics() {
+		return "", "", ErrForensicsBudget
+	}
+	res, err := s.forensicsConverser.Converse(ctx, distillSystem,
+		[]agent.Message{{Role: agent.RoleUser, Blocks: []agent.Block{{Text: turn}}}}, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("distil: %w", err)
+	}
+	fact := strings.TrimSpace(res.Text)
+	if fact == "" {
+		return "", "", errors.New("the model produced no memory to store")
+	}
+	emb, err := s.inverter.EmbedLive(ctx, fact)
+	if err != nil {
+		return "", "", fmt.Errorf("embed: %w", err)
+	}
+	b64, _ := emb["embedding_b64"].(string)
+	if b64 == "" {
+		return "", "", errors.New("embedding worker returned no vector")
+	}
+	return fact, b64, nil
+}
+
+// allowForensics records a live agent call (forensics or memory-writer) and reports whether it is
+// within the rolling-hour budget, pruning stale timestamps on each call.
 func (s *Service) allowForensics() bool {
 	s.forensicsMu.Lock()
 	defer s.forensicsMu.Unlock()
