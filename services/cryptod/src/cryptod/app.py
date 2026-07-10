@@ -23,7 +23,7 @@ from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel
 
-from . import aead, anchor, inversion, kms, proof, settings, signing
+from . import aead, anchor, envelope, inversion, kms, proof, settings, signing
 
 log = logging.getLogger("cryptod")
 
@@ -106,18 +106,30 @@ def create_app(cfg: settings.Settings | None = None) -> FastAPI:
     def prepare(req: PrepareRequest) -> dict:
         if not cfg.kms_wrapping_key_arn:
             raise HTTPException(500, "KMS_WRAPPING_KEY_ARN not configured")
-        dk = kms.KMS(cfg.aws_region).generate_data_key(cfg.kms_wrapping_key_arn, req.subject_id)
+        # Two-level envelope. The subject key is generated + KMS-wrapped and stored once in
+        # subject_keys; a fresh per-row data key is wrapped UNDER the subject key and stored in the
+        # agent_memory row. Content and embedding are encrypted with the row key. Erasure deletes
+        # the subject_keys row, so the subject key (only ever held there in KMS-wrapped form) is
+        # gone, the row key can never be unwrapped, and the ciphertext is dead. The row wrapped key
+        # surviving in agent_memory is useless without the destroyed subject key.
+        subject = kms.KMS(cfg.aws_region).generate_data_key(
+            cfg.kms_wrapping_key_arn, req.subject_id
+        )
+        row_key = envelope.new_data_key()
+        row_material = envelope.wrap_data_key(subject.plaintext, row_key)
         aad = req.subject_id.encode()
-        content_ct = aead.encrypt(dk.plaintext, _b64d(req.content), aad)
-        embedding_ct = aead.encrypt(dk.plaintext, _b64d(req.embedding), aad)
-        # dk.plaintext goes out of scope here; only the wrapped copy is returned for storage.
+        content_ct = aead.encrypt(row_key, _b64d(req.content), aad)
+        embedding_ct = aead.encrypt(row_key, _b64d(req.embedding), aad)
+        # subject.plaintext and row_key go out of scope here; only wrapped copies are returned.
         return {
             "content_ciphertext": _b64e(content_ct.ct),
             "nonce_content": _b64e(content_ct.nonce),
             "embedding_ciphertext": _b64e(embedding_ct.ct),
             "nonce_embedding": _b64e(embedding_ct.nonce),
-            "wrapped_key": _b64e(dk.wrapped),
-            "wrapped_key_fingerprint": hashlib.sha256(dk.wrapped).hexdigest(),
+            "subject_wrapped_key": _b64e(subject.wrapped),
+            "subject_key_fingerprint": hashlib.sha256(subject.wrapped).hexdigest(),
+            "row_wrapped_key": _b64e(row_material.wrapped),
+            "kms_key_arn": cfg.kms_wrapping_key_arn,
         }
 
     @app.post("/shred")

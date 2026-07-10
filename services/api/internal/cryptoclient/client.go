@@ -20,14 +20,18 @@ type PrepareRequest struct {
 	Embedding string `json:"embedding"` // base64
 }
 
-// PrepareResponse carries the ciphertexts and the wrapped key to store.
+// PrepareResponse carries the ciphertexts and the two-level wrapped keys to store: the KMS-wrapped
+// subject key (subject_keys.wrapped_key) and the per-row key wrapped under the subject key
+// (agent_memory.wrapped_key).
 type PrepareResponse struct {
 	ContentCiphertext     string `json:"content_ciphertext"`
 	NonceContent          string `json:"nonce_content"`
 	EmbeddingCiphertext   string `json:"embedding_ciphertext"`
 	NonceEmbedding        string `json:"nonce_embedding"`
-	WrappedKey            string `json:"wrapped_key"`
-	WrappedKeyFingerprint string `json:"wrapped_key_fingerprint"`
+	SubjectWrappedKey     string `json:"subject_wrapped_key"`
+	SubjectKeyFingerprint string `json:"subject_key_fingerprint"`
+	RowWrappedKey         string `json:"row_wrapped_key"`
+	KMSKeyARN             string `json:"kms_key_arn"`
 }
 
 // ShredResponse reports the imported-material kill switch outcome.
