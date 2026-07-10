@@ -67,5 +67,6 @@ CREATE TABLE IF NOT EXISTS erasure_record (
     committed_at             TIMESTAMPTZ,
     decision_log_seq         INT8,                 -- the decision_log row that recorded this erasure
     wrapped_key_fingerprint  BYTES,                -- retained proof that a key once existed
+    kms_key_arn              STRING,               -- retained so the reconciler can anchor the proof
     proof_ref                STRING                -- s3://... URI of the signed proof (set post-commit)
 );

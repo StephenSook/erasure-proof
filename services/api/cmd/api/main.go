@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/StephenSook/erasure-proof/services/api/internal/config"
+	"github.com/StephenSook/erasure-proof/services/api/internal/cryptoclient"
 	"github.com/StephenSook/erasure-proof/services/api/internal/erasure"
 	"github.com/StephenSook/erasure-proof/services/api/internal/httpapi"
 	"github.com/StephenSook/erasure-proof/services/api/internal/store"
@@ -43,7 +44,9 @@ func main() {
 		log.Print("warning: agent and operator share one pool; set CRDB_DSN_AGENT_WORKER to enforce least privilege")
 	}
 
-	srv := httpapi.New(st, erasure.New(st), os.Getenv("GIT_SHA"))
+	crypto := cryptoclient.NewHTTP(cfg.CryptodURL)
+	orch := erasure.NewOrchestrator(st, crypto)
+	srv := httpapi.New(st, orch, os.Getenv("GIT_SHA"))
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           srv.Routes(),

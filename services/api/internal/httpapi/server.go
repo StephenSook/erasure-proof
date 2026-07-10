@@ -13,16 +13,16 @@ import (
 	"github.com/StephenSook/erasure-proof/services/api/internal/store"
 )
 
-// Server wires the store and the erasure service to HTTP handlers.
+// Server wires the store and the erasure orchestrator to HTTP handlers.
 type Server struct {
 	store  *store.Store
-	erase  *erasure.Service
+	orch   *erasure.Orchestrator
 	commit string // the deployed git SHA, echoed by /healthz so we can prove what is served
 }
 
 // New builds a Server.
-func New(s *store.Store, e *erasure.Service, commit string) *Server {
-	return &Server{store: s, erase: e, commit: commit}
+func New(s *store.Store, orch *erasure.Orchestrator, commit string) *Server {
+	return &Server{store: s, orch: orch, commit: commit}
 }
 
 // Routes returns the HTTP handler.
@@ -88,23 +88,28 @@ func (s *Server) handleErase(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	res, err := s.erase.Erase(ctx, req.SubjectID, erasure.ActionErasure, basis)
+	// EraseAndAnchor commits the erasure, then anchors the signed proof post-commit. If anchoring
+	// fails the erasure is still durably done (res is populated); the reconciler will anchor later.
+	res, proofRef, err := s.orch.EraseAndAnchor(ctx, req.SubjectID, basis)
 	switch {
 	case errors.Is(err, erasure.ErrAlreadyErased):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "already erased"})
 		return
 	case errors.Is(err, erasure.ErrSubjectNotFound):
-		// A mistyped or unknown id did nothing; surface it clearly and log it so it is not mistaken
-		// for a completed erasure.
-		log.Printf("httpapi: erase requested for unknown subject")
+		log.Print("httpapi: erase requested for unknown subject")
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown subject"})
 		return
-	case err != nil:
-		// A real failure: log the detail server-side, return a generic error to the client so
-		// internal SQL/schema structure is not disclosed.
+	case err != nil && res.Seq == 0:
+		// The erasure transaction itself failed: nothing was erased.
 		log.Printf("httpapi: erase failed (basis=%s): %v", basis, err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "erasure failed"})
 		return
+	case err != nil:
+		// Erased durably, but anchoring the proof did not complete. Report success with the proof
+		// pending; the reconciler will anchor it. Log the anchor error server-side.
+		log.Printf("httpapi: erase committed but proof anchor pending (seq=%d): %v", res.Seq, err)
+		writeJSON(w, http.StatusOK, map[string]any{"result": res, "proof_pending": true})
+		return
 	}
-	writeJSON(w, http.StatusOK, res)
+	writeJSON(w, http.StatusOK, map[string]any{"result": res, "proof_ref": proofRef})
 }
