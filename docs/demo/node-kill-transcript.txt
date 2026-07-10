@@ -1,0 +1,89 @@
+# Node-kill durability capture (local 3-node cluster, real Raft)
+#
+# Captured: 2026-07-10. Image: cockroachdb/cockroach:latest-v25.2. Rig: deploy/local/docker-compose.yml
+# (3 nodes + HAProxy; replication factor 3, so killing one node preserves quorum).
+#
+# What this proves: a committed destroy-and-retain erasure survives losing a node. Each run
+# seeds a subject, erases it in ONE SERIALIZABLE transaction (crdbpgx 40001 retry), kills
+# roach2, then verifies from the SURVIVING replicas: wrapped key gone, decision-log row
+# present, erasure record present, live embedding NULL. The killed node restarts and
+# catches up. The managed cloud cluster's nodes cannot be killed by us, so this beat is
+# local by necessity and disclosed as such: same SQL, same DDL, same retry semantics.
+#
+# Reproduce: PYTHON=$PWD/.venv-spikes/bin/python CRDB_IMAGE=cockroachdb/cockroach:latest-v25.2 bash spikes/spike3_nodekill/run.sh
+
+== bringing up 3-node cluster + haproxy ==
+ Network local_default Creating 
+ Network local_default Created 
+ Volume local_roach3-data Creating 
+ Volume local_roach3-data Created 
+ Volume local_roach1-data Creating 
+ Volume local_roach1-data Created 
+ Volume local_roach2-data Creating 
+ Volume local_roach2-data Created 
+ Container roach2 Creating 
+ Container roach1 Creating 
+ Container roach3 Creating 
+ Container roach1 Created 
+ Container roach2 Created 
+ Container roach3 Created 
+ Container roach-init Creating 
+ Container roach-haproxy Creating 
+ Container roach-init Created 
+ Container roach-haproxy Created 
+ Container roach2 Starting 
+ Container roach1 Starting 
+ Container roach3 Starting 
+ Container roach3 Started 
+ Container roach1 Started 
+ Container roach2 Started 
+ Container roach-haproxy Starting 
+ Container roach2 Waiting 
+ Container roach3 Waiting 
+ Container roach1 Waiting 
+ Container roach-haproxy Started 
+ Container roach2 Healthy 
+ Container roach1 Healthy 
+ Container roach3 Healthy 
+ Container roach-init Starting 
+ Container roach-init Started 
+== waiting for cluster ready ==
+== creating database + applying migrations ==
+CREATE DATABASE
+== waiting for host SQL port 26257 ==
+applied 0001_schema.sql
+applied 0002_roles.sql
+
+== run 1: subject 704fad9f-c331-4c12-87ba-96deca8b65b6 ==
+seeded subject 704fad9f-c331-4c12-87ba-96deca8b65b6
+-- erasing (direct to roach1, a node we never kill) --
+erased subject 704fad9f-c331-4c12-87ba-96deca8b65b6 at decision_log seq 1 in 9.5ms (attempt 1)
+-- killing roach2 --
+-- verifying committed state from surviving replicas (roach1/roach3) --
+key_gone=True log_present=True record_present=True embedding_null=True  => PASS
+run 1: committed erasure survived the node kill
+-- restarting roach2, confirming catch-up --
+
+== run 2: subject 7b9a3d7f-f030-481e-9e7e-ec4aff41d1ab ==
+seeded subject 7b9a3d7f-f030-481e-9e7e-ec4aff41d1ab
+-- erasing (direct to roach1, a node we never kill) --
+erased subject 7b9a3d7f-f030-481e-9e7e-ec4aff41d1ab at decision_log seq 2 in 61.7ms (attempt 1)
+-- killing roach2 --
+-- verifying committed state from surviving replicas (roach1/roach3) --
+key_gone=True log_present=True record_present=True embedding_null=True  => PASS
+run 2: committed erasure survived the node kill
+-- restarting roach2, confirming catch-up --
+
+== run 3: subject 44788785-4511-4251-9b61-b0f28be81731 ==
+seeded subject 44788785-4511-4251-9b61-b0f28be81731
+-- erasing (direct to roach1, a node we never kill) --
+erased subject 44788785-4511-4251-9b61-b0f28be81731 at decision_log seq 3 in 19.0ms (attempt 1)
+-- killing roach2 --
+-- verifying committed state from surviving replicas (roach1/roach3) --
+key_gone=True log_present=True record_present=True embedding_null=True  => PASS
+run 3: committed erasure survived the node kill
+-- restarting roach2, confirming catch-up --
+
+=== SPIKE 3 VERDICT: 3/3 runs survived the node kill ===
+Record the result, the variant used, and whether catch-up worked in findings.md
+(Leave the cluster up for the recording, or 'docker compose -f deploy/local/docker-compose.yml down -v' to clean up.)

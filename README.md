@@ -29,20 +29,29 @@ of truth and is mirrored on the app `/trust` page.
 
 | Capability | Tier | Notes |
 |-----------|------|-------|
-| Schema, least-privilege roles, append-only decision log | in progress | migrations 0001-0002 |
-| C-SPANN vector index on the affordable tier | spike pending | gated by spike 2 |
-| Vec2Text name-then-noise leak/erasure beat | spike pending | gated by spike 1 (Colab GPU) |
-| Atomic erasure surviving a node kill | spike pending | gated by spike 3 (local 3-node) |
-| AES-256-GCM envelope crypto + KMS key destruction | planned | Phase 2 |
-| ECDSA-signed proof + S3 Object Lock anchor | planned | Phase 2 |
-| Read-only forensics MCP server | planned | Phase 2 |
-| Deployed live demo app | planned | Phase 3 |
+| Schema, least-privilege roles, append-only decision log | wired-live | migrations 0001-0005; CI proves the 42501 rejection |
+| C-SPANN vector index (free Basic tier) | wired-live | subject_id prefix; spike 2 findings in `spikes/` |
+| AES-256-GCM two-level envelope + KMS key destruction | wired-live | real-AWS smoke + hypothesis property tests |
+| SERIALIZABLE destroy-and-retain erasure transaction | wired-live | crdbpgx 40001 retry; atomicity test under injected retries |
+| ECDSA-signed proof + S3 Object Lock anchor | wired-live | GOVERNANCE in dev; COMPLIANCE bucket at submission |
+| RFC 6962 Merkle transparency log, root signed into proofs | wired-live | `/api/tree-head`, `/api/inclusion`, browser verify |
+| Browser-side proof verification (`/proof/:id`) | wired-live | WebCrypto over the exact stored canonical bytes |
+| Row-level security scoping the agent per subject | wired-live | fail-closed; full matrix asserted in CI |
+| Read-only forensics MCP server (4 tools, audit-logged) | wired-live | plus Bedrock forensics agent over the same tools |
+| Managed MCP Server verification path | wired-live | `infra/ccloud/mcp-verify.sh`, live-proven |
+| ccloud service-account RBAC boundaries | wired-live | `infra/ccloud/rbac-demo.sh`: 403 vs MCP-authz vs 42501 |
+| Atomic erasure surviving a node kill | integration | local 3-node rig (managed cloud nodes cannot be killed by us) |
+| Vec2Text name-then-noise inversion | integration | recorded golden run (Modal T4), reproducible; live InvalidTag is the proof |
+| REGIONAL BY ROW geo-domiciling | integration | optional migration, verified on a local 3-region cluster; NOT enabled on the single-region demo |
+| Deployed live demo app | integration | full-stack rehearsal deployed, smoked, and torn down 2026-07-10; judge-facing deploy lands early August |
 
-Tiers used: `wired-live` (runs live in the deployed app), `integration` (built and tested, not yet
-on the live path), `spike pending` / `in progress` / `planned` (not yet built). No capability is
-described in the pitch at a higher tier than it holds here.
+Tiers used: `wired-live` (runs on the real path today, verifiable from this repo), `integration`
+(built and tested, live by necessity elsewhere or landing at the scheduled deploy). No capability
+is described in the pitch at a higher tier than it holds here.
 
 ## Architecture
+
+![Architecture diagram](docs/architecture.svg)
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full component contract and data flow,
 [SECURITY.md](SECURITY.md) for the threat model and the exact honest conditions on every claim,
@@ -71,24 +80,38 @@ docs/          architecture diagram, API contract, demo script  (README)
 Each directory carries a short README describing its purpose. Top-level docs (ARCHITECTURE,
 SECURITY, COMPLIANCE) stay at the root where GitHub surfaces them.
 
-## CockroachDB tools used
+## CockroachDB tools used (all four wired; the hackathon requires two)
 
-(Filled in as each is wired; the hackathon requires at least two. Target: all four.)
+- **Distributed Vector Indexing (C-SPANN, preview)**: the live GTR embedding is indexed with a
+  `subject_id` prefix, so per-subject similarity search is index-accelerated and the erasure
+  purge (setting the vector NULL) is a plain UPDATE the index survives. Runs on the free Basic
+  tier. Euclidean at preview. (`db/migrations/0003_vector_index.sql`, spike 2 findings.)
+- **Managed MCP Server**: the independent verification path. A least-privilege service account
+  reads the decision-log chain head through `cockroachlabs.cloud/mcp` (`select_query`), so a
+  verifier does not have to trust our API layer, and every call is audit-logged by CockroachDB
+  Cloud. (`infra/ccloud/mcp-verify.sh`.)
+- **ccloud CLI (service-account RBAC)**: provisions the cloud cluster and demonstrates three
+  DISTINCT denial boundaries live: control-plane HTTP 403, MCP-layer Cloud-RBAC refusal, and
+  data-plane SQLSTATE 42501 on the append-only log. (`infra/ccloud/rbac-demo.sh`.)
+- **Agent Skills**: a `verifying-cryptographic-erasure` skill authored in this repo
+  (`skills/`), following upstream `cockroachlabs/cockroachdb-skills` conventions and validated
+  with their own `validate-spec.py` (zero errors); the upstream contribution PR is in flight.
 
-- Distributed Vector Indexing (C-SPANN): the agent's embeddings, prefixed on subject_id.
-- Managed MCP Server: forensic verification reads via `select_query`.
-- ccloud CLI (service-account RBAC): least-privilege control-plane access, the 403 boundary.
-- Agent Skills: consumed, plus an upstream contribution (a verify-erasure-proof skill).
+Earned feedback on all four tools: [docs/feedback-cockroachdb-tools.md](docs/feedback-cockroachdb-tools.md).
 
-## AWS services used
+## AWS services used (all load-bearing; the hackathon requires one)
 
-(Filled in as each is wired; the hackathon requires at least one.)
-
-- AWS KMS: envelope encryption; destroying the key is the actual erasure.
-- Amazon S3 Object Lock (COMPLIANCE): the immutable, externally anchored proof.
-- Amazon Bedrock (Claude): agent inference; optional Titan v2 for an AWS-native embedding shown in
-  parallel.
-- Amazon ECS / Fargate: the always-on, connection-pooled erasure path.
+- **AWS KMS**: the erasure mechanism itself. Per-subject envelope keys via GenerateDataKey with
+  `subject_id` bound as encryption context; deleting the wrapped-key row is the crypto-shred,
+  and imported-material subjects carry a second kill switch (DeleteImportedKeyMaterial, proven
+  against real KMS).
+- **Amazon S3 Object Lock**: every erasure proof is ECDSA-signed and anchored to a WORM bucket
+  (GOVERNANCE in development, COMPLIANCE for the judged proofs).
+- **Amazon Bedrock (Claude)**: the memory-writer agent distils durable facts via real inference;
+  the forensics agent proves an erasure through the four read-only tools and returns a verdict
+  with its trace.
+- **Amazon ECS / Fargate**: the always-on, connection-pooled erasure path (Lambda plus a SQL
+  database exhausts connections; the deploy stack is `deploy/aws/`).
 
 ---
 
@@ -98,16 +121,22 @@ The following sections map to the five equally weighted judging criteria.
 
 CockroachDB is the system of record for the full memory lifecycle: write, retrieve, erase, prove.
 The `agent_memory` row stores the embedding only as ciphertext for durability, plus a live
-plaintext vector that C-SPANN indexes for search; per-subject envelope keys make each subject's
-memory independently destroyable; the hash-chained `decision_log` is itself retained agent memory.
-(Details: [ARCHITECTURE.md](ARCHITECTURE.md).)
+plaintext vector that C-SPANN indexes for search; two-level per-subject envelope keys make each
+subject's memory independently destroyable with one row deletion; row-level security scopes the
+agent to the single subject its session declares, fail-closed; and the hash-chained, Merkle-treed
+`decision_log` is itself retained agent memory, with each memory's ciphertext bound to the chain
+head it observed (AES-GCM associated data). (Details: [ARCHITECTURE.md](ARCHITECTURE.md).)
 
 ## Technical Implementation
 
 The destroy-and-retain erasure runs in one serializable transaction with the official 40001 retry
-wrapper; AES-256-GCM binds subject_id as associated data; the erasure emits an ECDSA P-256 proof;
-a genuinely read-only MCP server exposes four forensic tools; a hypothesis property-test suite
-proves the invariant. (Details: [ARCHITECTURE.md](ARCHITECTURE.md), [SECURITY.md](SECURITY.md).)
+wrapper (atomicity proven under injected retry errors); AES-256-GCM binds `subject_id || chain
+head` as associated data; every erasure emits an ECDSA P-256 proof that signs the decision-log
+seq, the erasure's own timestamp, and the RFC 6962 Merkle root and tree size, anchored to S3
+Object Lock; the proof verifies in the judge's browser over the exact stored canonical bytes,
+with client-side subject binding against replay; a genuinely read-only MCP server exposes four
+forensic tools; and a hypothesis property-test suite proves decrypt-fails-after-destruction.
+(Details: [ARCHITECTURE.md](ARCHITECTURE.md), [SECURITY.md](SECURITY.md).)
 
 ## Real-World Impact
 
@@ -131,28 +160,46 @@ proof. (On the relationship to the emerging PCT standard, see
 
 ## Production Readiness
 
-CI runs lint, typecheck, and tests on every push; the erasure path runs on always-on Fargate with
-a warm pool; three separated IAM principals with confused-deputy conditions; circuit-breaker
-deploys; a recorded node-kill durability proof; a keepalive watchdog through judging; a `/trust`
-honesty page. (Details: [SECURITY.md](SECURITY.md).)
+Seven CI jobs (Go race tests against a real CockroachDB, Python property tests under moto, web
+typecheck/lint/tests, full-history secret scanning, and a db-smoke job that proves the
+append-only and locking-privilege invariants as the REAL roles, not root) run on every push. The
+deploy is code (`deploy/aws/`: one CloudFront URL, always-on Fargate, circuit-breaker rollback,
+three separated IAM principals with confused-deputy conditions) and was rehearsed end to end:
+deployed, smoked live including a full erase-and-prove loop on the cloud cluster, and torn down
+the same day; the rehearsal caught and fixed a real signed-timestamp bug before any judge could
+see it. A dormant keepalive workflow with a dead-man ping activates at the judge-facing deploy.
+(Details: [SECURITY.md](SECURITY.md), [deploy/aws/README.md](deploy/aws/README.md).)
 
 ## Creativity & Originality
 
 The primitive (crypto-shredding) is standard (NIST SP 800-88 Rev. 2) and CyborgDB ships the
 encrypted-vector version. The contribution is the combination: a crypto-erased embedding, an
-atomically retained decision log, and an externally anchored signed proof, on a database that
-survives node loss, reconciling GDPR Article 17 against EU AI Act Article 19. Prior art (CyborgDB,
-MemLineage, OWASP Agent Memory Guard, Zep) is cited proactively in [SECURITY.md](SECURITY.md).
+atomically retained decision log structured as an RFC 6962 transparency tree whose signed root
+travels inside every proof, and an externally anchored signed proof a browser can verify, on a
+database that survives node loss, reconciling GDPR Article 17 against EU AI Act Article 19. Prior
+art (CyborgDB, MemLineage, OWASP Agent Memory Guard, Zep) is cited proactively in
+[SECURITY.md](SECURITY.md).
 
 ## Setup and run
 
-Local quickstart (filled out as the stack lands):
+Local full stack (real KMS + real Object Lock dev bucket + role-scoped pools; needs Docker, Go,
+uv, Node, and AWS credentials per `.env.example`):
 
 ```bash
-cp .env.example .env            # fill in placeholders
-make cluster-up                 # local 3-node CockroachDB + HAProxy (needs Docker)
+cp .env.example .env                      # fill in placeholders
+bash deploy/local/run-fullstack.sh        # single-node CRDB + cryptod + api, role-scoped
+cd web && npm ci && npm run dev           # the console on top
+```
+
+Piecewise:
+
+```bash
+make cluster-up                 # local 3-node CockroachDB + HAProxy (the durability lab)
 make migrate                    # apply db/migrations
 make spike3                     # atomic-erasure-survives-node-kill demo
+bash deploy/local/rbr-verify.sh # optional REGIONAL BY ROW migration on a 3-region local cluster
+bash infra/ccloud/mcp-verify.sh # chain-head verification through the Managed MCP Server
+bash infra/ccloud/rbac-demo.sh  # the three RBAC denial boundaries, live
 ```
 
 The three week-one spikes live in `spikes/` and gate the build; see each `findings.md`.
