@@ -121,3 +121,40 @@ class Inverter:
             "num_steps": num_steps,
             "sequence_beam_width": beam,
         }
+
+    @modal.fastapi_endpoint(method="POST")
+    def embed(self, data: dict):
+        """Canonical GTR-base embedding of a text, for the live agent memory-writer. Uses the SAME
+        unnormalized mean-pool pipeline as db/seed/embed_corpus.py and spike 1, so a memory written
+        here is invertible by /invert (the leak beat still works on judge-written memories)."""
+        import base64
+        import hashlib
+        import hmac
+        import os
+
+        import torch
+        from fastapi import HTTPException
+
+        secret = os.environ.get("INVERT_SECRET", "")
+        if not secret or not hmac.compare_digest(str(data.get("secret", "")), secret):
+            raise HTTPException(status_code=401, detail="unauthorized")
+        text = str(data.get("text", "")).strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="text is required")
+        if len(text) > 2000:
+            raise HTTPException(status_code=400, detail="text too long")
+
+        inp = self.tokenizer(
+            [text], return_tensors="pt", max_length=128, truncation=True, padding="max_length"
+        ).to(self.device)
+        with torch.no_grad():
+            out = self.encoder(input_ids=inp["input_ids"], attention_mask=inp["attention_mask"])
+            mask = inp["attention_mask"].unsqueeze(-1).float()
+            pooled = (out.last_hidden_state * mask).sum(1) / mask.sum(1).clamp(min=1e-9)
+        vec_bytes = pooled[0].detach().cpu().numpy().astype("<f4").tobytes()  # 768 * 4 = 3072
+        return {
+            "embedding_b64": base64.b64encode(vec_bytes).decode(),
+            "sha256": hashlib.sha256(vec_bytes).hexdigest(),
+            "dims": 768,
+            "device": self.device,
+        }

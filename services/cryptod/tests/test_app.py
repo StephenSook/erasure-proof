@@ -156,6 +156,51 @@ def test_invert_config_reports_live_availability():
     assert on.get("/invert/config").json()["live_available"] is True
 
 
+def test_embed_config_reports_availability():
+    off = TestClient(create_app(_plain_cfg()))
+    assert off.get("/embed/config").json()["embed_available"] is False
+    on = TestClient(
+        create_app(_plain_cfg(modal_embed_url="https://e.modal.run", modal_invert_secret="s"))  # noqa: S106
+    )
+    assert on.get("/embed/config").json()["embed_available"] is True
+
+
+def test_embed_live_503_when_unconfigured():
+    client = TestClient(create_app(_plain_cfg()))
+    r = client.post("/embed/live", json={"text": "a durable fact"})
+    assert r.status_code == 503
+
+
+def test_embed_live_calls_worker(monkeypatch):
+    from cryptod import inversion
+
+    def fake_urlopen(req, timeout=0):
+        import base64 as b64
+        import io
+        import json as _json
+
+        payload = _json.loads(req.data.decode())
+        assert payload["text"] == "a durable fact"
+        assert payload["secret"] == "sek"  # noqa: S105
+        emb = b64.b64encode(b"\x01" * 3072).decode()
+        body = _json.dumps({"embedding_b64": emb, "sha256": "ab" * 32, "dims": 768}).encode()
+
+        class _Resp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        return _Resp(body)
+
+    monkeypatch.setattr(inversion.urllib.request, "urlopen", fake_urlopen)
+    cfg = _plain_cfg(modal_embed_url="https://e.modal.run", modal_invert_secret="sek")  # noqa: S106
+    r = TestClient(create_app(cfg)).post("/embed/live", json={"text": "a durable fact"})
+    assert r.status_code == 200
+    assert r.json()["dims"] == 768
+
+
 def test_invert_live_falls_back_to_recorded_when_unconfigured():
     # No Modal config: /invert/live must NOT hard-fail; it returns the recorded run, flagged.
     client = TestClient(create_app(_plain_cfg()))

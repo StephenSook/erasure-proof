@@ -113,9 +113,24 @@ export class ApiError extends Error {
   }
 }
 
-// AgentConfig tells the UI whether the live Bedrock forensics agent is wired.
+// AgentConfig tells the UI which live Bedrock agent features are wired.
 export interface AgentConfig {
   live_available: boolean
+  forensics_available?: boolean
+  memory_writer_available?: boolean
+}
+
+// MemoryWriterResult is the agent-written memory: the distilled fact and where it was stored.
+// source is "live_bedrock" when the real agent ran, "recorded" for the honest mock.
+export interface MemoryWriterResult {
+  source: string
+  memory_text: string
+  subject_id: string
+  memory_id: string
+  // The stored memory's own vector + hash, so the live-inversion beat can reconstruct the judge's
+  // own words and the match-check compares against the right hash.
+  embedding_b64: string
+  embedding_sha256: string
 }
 
 // AgentToolCall is one recorded tool invocation in the agent's evidence trace.
@@ -146,6 +161,7 @@ export interface DemoApi {
   liveInversion(embeddingB64: string): Promise<LiveInversion>
   getAgentConfig(): Promise<AgentConfig>
   forensicsAudit(subjectId: string): Promise<ForensicsAudit>
+  writeMemory(turn: string): Promise<MemoryWriterResult>
   erase(subjectId: string, lawfulBasis?: string): Promise<EraseResponse>
   getProof(subjectId: string): Promise<ProofView>
   getDecisionLog(): Promise<DecisionRow[]>

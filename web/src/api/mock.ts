@@ -15,6 +15,7 @@ import {
   type InversionGoldenRun,
   type LiveInversion,
   type MemoryView,
+  type MemoryWriterResult,
   type ProofView,
   type RbacResult,
 } from './types'
@@ -133,7 +134,30 @@ export function createMockClient(): DemoApi {
     async getAgentConfig(): Promise<AgentConfig> {
       // The mock has no Bedrock; advertise the live agent as unavailable so the UI shows the
       // recorded verdict. A real deploy with AGENTS_LIVE=1 flips this to true.
-      return { live_available: false }
+      return { live_available: false, forensics_available: false, memory_writer_available: false }
+    },
+    async writeMemory(turn: string): Promise<MemoryWriterResult> {
+      // No Bedrock in the mock: distil to the first sentence (deterministic), store a real mock
+      // subject the loop then uses, and label it recorded so it is never mistaken for live Claude.
+      const fact = (turn.split(/[.!?]/)[0] || turn).trim() + '.'
+      subjectId = '22222222-3333-4333-8444-555555555555'
+      erased = false
+      proofBody = ''
+      proofSignature = ''
+      signerPem = ''
+      // A deterministic 3072-byte vector + its real hash, so the invert + match-check UI path is
+      // exercised end to end even without a GPU.
+      const vec = new Uint8Array(3072).fill(fact.length % 256)
+      const digest = await crypto.subtle.digest('SHA-256', vec)
+      const sha = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
+      return {
+        source: 'recorded',
+        memory_text: fact,
+        subject_id: subjectId,
+        memory_id: 'bbbbbbbb-0000-4000-8000-000000000002',
+        embedding_b64: btoa(String.fromCharCode(...vec)),
+        embedding_sha256: sha,
+      }
     },
     async forensicsAudit(): Promise<ForensicsAudit> {
       // No Bedrock in the mock: return an honestly-labeled recorded verdict whose trace reflects

@@ -191,6 +191,31 @@ func (c *HTTP) InvertConfig(ctx context.Context) (map[string]any, error) {
 	return c.doInvert(c.http, req)
 }
 
+// EmbedLive embeds a fact on the Modal GPU (canonical GTR pipeline) via cryptod /embed/live. It uses
+// liveHTTP because a cold GPU container takes time; a non-2xx (e.g. 503 when the worker is
+// unconfigured) surfaces as an error so the memory-writer never stores an unusable memory.
+func (c *HTTP) EmbedLive(ctx context.Context, text string) (map[string]any, error) {
+	body, err := json.Marshal(map[string]any{"text": text})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/embed/live", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return c.doInvert(c.liveHTTP, req)
+}
+
+// EmbedConfig reports whether cryptod has a live GTR embedding worker configured.
+func (c *HTTP) EmbedConfig(ctx context.Context) (map[string]any, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/embed/config", nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.doInvert(c.http, req)
+}
+
 func (c *HTTP) doInvert(client *http.Client, req *http.Request) (map[string]any, error) {
 	resp, err := client.Do(req)
 	if err != nil {
