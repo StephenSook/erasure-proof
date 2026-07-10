@@ -160,9 +160,12 @@ func (svc *Service) Erase(ctx context.Context, subjectID string, action Action, 
 		rowHash := chain.Link(prevHash, newSeq, string(action), string(lawfulBasis), subjectHash)
 
 		// 3. Append the pseudonymized, hash-chained decision-log row, capturing its occurred_at so
-		// the signed proof can state the erasure's actual time (not anchor time).
+		// the signed proof can state the erasure's actual time (not anchor time). Scanned into a
+		// local so the Result literal below cannot drop it (the 2026-07-10 rehearsal caught a
+		// signed proof carrying the zero time exactly that way).
+		var occurredAt time.Time
 		if err := tx.QueryRow(ctx, svc.q.MustGet(qInsertDecision),
-			newSeq, subjectHash, string(action), string(lawfulBasis), prevHash, rowHash).Scan(&res.OccurredAt); err != nil {
+			newSeq, subjectHash, string(action), string(lawfulBasis), prevHash, rowHash).Scan(&occurredAt); err != nil {
 			return fmt.Errorf("insert decision: %w", err)
 		}
 
@@ -184,7 +187,7 @@ func (svc *Service) Erase(ctx context.Context, subjectID string, action Action, 
 
 		res = Result{
 			Seq: newSeq, SubjectHash: subjectHash, Fingerprint: fingerprint, ChainHead: rowHash,
-			KMSKeyARN: kmsKeyARN, KeyOrigin: keyOrigin,
+			KMSKeyARN: kmsKeyARN, KeyOrigin: keyOrigin, OccurredAt: occurredAt,
 		}
 		return nil
 	})

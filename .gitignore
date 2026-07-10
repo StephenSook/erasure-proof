@@ -80,3 +80,4 @@ db/seed/seeded_subjects.json
 
 # --- Logs ---
 *.log
+*.tfplan

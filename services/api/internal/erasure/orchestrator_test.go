@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/StephenSook/erasure-proof/services/api/internal/cryptoclient"
 	"github.com/StephenSook/erasure-proof/services/api/internal/erasure"
@@ -13,10 +14,11 @@ import (
 // stubCrypto is an in-memory cryptoclient.Client for testing the post-commit anchoring without a
 // running cryptod.
 type stubCrypto struct {
-	anchorErr    error
-	shredErr     error
-	lastMerkle   string // captured req.MerkleRoot
-	lastTreeSize int
+	anchorErr      error
+	shredErr       error
+	lastMerkle     string // captured req.MerkleRoot
+	lastTreeSize   int
+	lastOccurredAt string // captured req.OccurredAt
 }
 
 func (s *stubCrypto) Prepare(context.Context, cryptoclient.PrepareRequest) (cryptoclient.PrepareResponse, error) {
@@ -36,6 +38,7 @@ func (s *stubCrypto) Anchor(_ context.Context, req cryptoclient.AnchorRequest) (
 	}
 	s.lastMerkle = req.MerkleRoot
 	s.lastTreeSize = req.TreeSize
+	s.lastOccurredAt = req.OccurredAt
 	return cryptoclient.AnchorResponse{
 		ProofRef:           "s3://proofs/" + req.SubjectHash + ".json",
 		ProofCanonical:     base64.StdEncoding.EncodeToString([]byte(`{"canonical":true}`)),
@@ -64,6 +67,12 @@ func TestEraseAndAnchor_RecordsProofRefOnSuccess(t *testing.T) {
 	}
 	if int64(stub.lastTreeSize) < res.Seq {
 		t.Errorf("tree size %d must include this erasure's seq %d", stub.lastTreeSize, res.Seq)
+	}
+	// Regression (2026-07-10 deploy rehearsal): a live proof was signed with occurred_at =
+	// 0001-01-01T00:00:00Z because the erasure Result literal dropped the scanned timestamp.
+	// The anchored occurred_at must parse and must not be the zero time.
+	if ts, err := time.Parse(time.RFC3339, stub.lastOccurredAt); err != nil || ts.IsZero() {
+		t.Errorf("anchored occurred_at = %q, want a real RFC3339 erasure time (parse err: %v)", stub.lastOccurredAt, err)
 	}
 	var stored *string
 	if err := st.Operator.QueryRow(context.Background(),
