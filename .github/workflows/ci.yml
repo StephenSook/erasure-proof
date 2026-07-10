@@ -30,6 +30,25 @@ jobs:
           docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/gitleaks/gitleaks:latest \
             detect --redact --no-banner
 
+  cryptod:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/cryptod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install
+        run: |
+          uv venv --python 3.12
+          uv pip install -e ".[dev]" numpy
+      - name: Lint (ruff)
+        run: uv run ruff check src tests
+      - name: Types (mypy)
+        run: uv run mypy src
+      - name: Tests (pytest + hypothesis)
+        run: uv run pytest -q
+
   db-smoke:
     runs-on: ubuntu-latest
     steps:
