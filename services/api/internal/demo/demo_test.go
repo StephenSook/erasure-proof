@@ -2,6 +2,7 @@ package demo_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/StephenSook/erasure-proof/services/api/internal/chain"
 	"github.com/StephenSook/erasure-proof/services/api/internal/demo"
@@ -33,9 +35,24 @@ func vectorLiteral() string {
 	return "[" + strings.Repeat("0.01,", 767) + "0.01]"
 }
 
-type stubInverter struct{ resp map[string]any }
+type stubInverter struct {
+	resp     map[string]any
+	liveWait chan struct{} // if set, InvertLive blocks on it (to exercise the concurrency guard)
+}
 
 func (s stubInverter) Invert(context.Context) (map[string]any, error) { return s.resp, nil }
+
+func (s stubInverter) InvertLive(_ context.Context, embeddingB64 string) (map[string]any, error) {
+	if s.liveWait != nil {
+		<-s.liveWait
+	}
+	// Echo the received bytes back so a test can assert the pass-through.
+	return map[string]any{"source": "live_gpu", "recovered_text": "name", "echo_b64": embeddingB64}, nil
+}
+
+func (s stubInverter) InvertConfig(context.Context) (map[string]any, error) {
+	return map[string]any{"live_available": true}, nil
+}
 
 // setup runs the demo tests in their OWN database (erasure_demo_test) so the global decision-log
 // chain and the TRUNCATE here never collide with the erasure/ingest tests that share CRDB_DSN_TEST.
@@ -332,4 +349,71 @@ func TestInversion_ProxiesGoldenRun(t *testing.T) {
 	if got["recovered_text"] != "a name" {
 		t.Errorf("got %v, want the stubbed golden run", got)
 	}
+}
+
+func TestInversionLive_ValidatesLengthAndProxies(t *testing.T) {
+	svc := demo.New(&store.Store{}, stubInverter{})
+	// Wrong length is rejected before any GPU call.
+	if _, err := svc.InversionLive(context.Background(), base64.StdEncoding.EncodeToString([]byte("short"))); err == nil {
+		t.Error("expected a length error for a non-3072-byte embedding")
+	}
+	// A correct 3072-byte embedding proxies through and the exact bytes reach the worker.
+	emb := base64.StdEncoding.EncodeToString(bytesRepeat(0x22, 3072))
+	got, err := svc.InversionLive(context.Background(), emb)
+	if err != nil {
+		t.Fatalf("InversionLive: %v", err)
+	}
+	if got["source"] != "live_gpu" || got["echo_b64"] != emb {
+		t.Errorf("got %v, want live_gpu source echoing the exact embedding", got)
+	}
+}
+
+func TestInversionLive_HourlyBudgetGuard(t *testing.T) {
+	svc := demo.New(&store.Store{}, stubInverter{})
+	// Freeze the clock so the rolling window is deterministic.
+	base := time.Unix(1_700_000_000, 0)
+	svc.SetNowForTest(func() time.Time { return base })
+	emb := base64.StdEncoding.EncodeToString(bytesRepeat(0x01, 3072))
+
+	// Exhaust the hourly budget, then the next call is refused with ErrLiveInversionBudget.
+	for i := 0; i < demo.LiveInvertMaxPerHourForTest; i++ {
+		if _, err := svc.InversionLive(context.Background(), emb); err != nil {
+			t.Fatalf("run %d within budget failed: %v", i, err)
+		}
+	}
+	if _, err := svc.InversionLive(context.Background(), emb); !errors.Is(err, demo.ErrLiveInversionBudget) {
+		t.Fatalf("want ErrLiveInversionBudget after exhausting the budget, got %v", err)
+	}
+	// An hour and a bit later, the window has rolled and calls are allowed again.
+	svc.SetNowForTest(func() time.Time { return base.Add(61 * time.Minute) })
+	if _, err := svc.InversionLive(context.Background(), emb); err != nil {
+		t.Fatalf("want a fresh allowance after the window rolled, got %v", err)
+	}
+}
+
+func TestInversionLive_ConcurrencyGuard(t *testing.T) {
+	// Two slots. Fill both with blocked calls, then a third must get ErrLiveInversionBusy.
+	gate := make(chan struct{})
+	svc := demo.New(&store.Store{}, stubInverter{liveWait: gate})
+	emb := base64.StdEncoding.EncodeToString(bytesRepeat(0x01, 3072))
+
+	started := make(chan struct{}, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			started <- struct{}{}
+			_, _ = svc.InversionLive(context.Background(), emb)
+		}()
+	}
+	<-started
+	<-started
+	// Give the two goroutines a moment to acquire both semaphore slots before probing the third.
+	for i := 0; i < 100; i++ {
+		if _, err := svc.InversionLive(context.Background(), emb); errors.Is(err, demo.ErrLiveInversionBusy) {
+			close(gate)
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(gate)
+	t.Error("expected ErrLiveInversionBusy while both slots were held")
 }

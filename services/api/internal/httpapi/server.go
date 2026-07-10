@@ -42,6 +42,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/proof", s.handleDemoProof)
 	mux.HandleFunc("GET /api/decision-log", s.handleDemoDecisionLog)
 	mux.HandleFunc("GET /api/inversion", s.handleDemoInversion)
+	mux.HandleFunc("GET /api/inversion/config", s.handleDemoInversionConfig)
+	mux.HandleFunc("POST /api/inversion/live", s.handleDemoInversionLive)
 	mux.HandleFunc("POST /api/verify-chain", s.handleDemoVerifyChain)
 	mux.HandleFunc("POST /api/rbac-demo", s.handleDemoRbac)
 	mux.HandleFunc("GET /api/tree-head", s.handleDemoTreeHead)
@@ -289,6 +291,52 @@ func (s *Server) handleDemoInversion(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("httpapi: demo inversion failed: %v", err)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "inversion unavailable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (s *Server) handleDemoInversionConfig(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	v, err := s.demo.InversionConfig(ctx)
+	if err != nil {
+		// A config probe failure is not fatal to the page; report live unavailable and move on.
+		writeJSON(w, http.StatusOK, map[string]any{"live_available": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (s *Server) handleDemoInversionLive(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Embedding string `json:"embedding"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	// Live inversion runs a real GPU model (cold start + the run, ~1-2.5 min). Order the deadlines
+	// Modal worker (300s) < cryptod wait (320s) < cryptod HTTP client (330s) < this handler (340s)
+	// so the innermost layer always finishes first and no layer abandons GPU work it already billed.
+	ctx, cancel := context.WithTimeout(r.Context(), 340*time.Second)
+	defer cancel()
+	v, err := s.demo.InversionLive(ctx, req.Embedding)
+	if errors.Is(err, demo.ErrLiveInversionBusy) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "the GPU is busy with another live inversion; try again in a moment",
+		})
+		return
+	}
+	if errors.Is(err, demo.ErrLiveInversionBudget) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "the live-inversion hourly budget is used up; the recorded run is always available",
+		})
+		return
+	}
+	if err != nil {
+		log.Printf("httpapi: live inversion failed: %v", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "live inversion unavailable"})
 		return
 	}
 	writeJSON(w, http.StatusOK, v)

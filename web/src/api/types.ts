@@ -82,6 +82,27 @@ export interface InversionGoldenRun {
   [key: string]: unknown
 }
 
+// InversionConfig tells the UI whether the live GPU worker is wired, so the live button appears
+// only when it can actually run.
+export interface InversionConfig {
+  live_available: boolean
+}
+
+// LiveInversion is the result of a live GPU inversion. source is "live_gpu" when the GPU ran, or
+// "recorded_golden_run" when cryptod fell back; input_sha256 (live path) is the SHA-256 of the
+// exact embedding bytes inverted, so the UI can prove the run matches the vector shown.
+export interface LiveInversion {
+  source: string
+  recovered_text?: string
+  seconds?: number
+  device?: string
+  input_sha256?: string
+  disclosure?: string
+  fell_back?: boolean
+  fallback_reason?: string
+  [key: string]: unknown
+}
+
 // ApiError carries the HTTP status so callers can distinguish 404 (not found yet) from real faults.
 export class ApiError extends Error {
   status: number
@@ -96,6 +117,8 @@ export interface DemoApi {
   ingest(contentB64: string, embeddingB64: string): Promise<IngestResult>
   getMemory(subjectId: string): Promise<MemoryView>
   getInversion(): Promise<InversionGoldenRun>
+  getInversionConfig(): Promise<InversionConfig>
+  liveInversion(embeddingB64: string): Promise<LiveInversion>
   erase(subjectId: string, lawfulBasis?: string): Promise<EraseResponse>
   getProof(subjectId: string): Promise<ProofView>
   getDecisionLog(): Promise<DecisionRow[]>
