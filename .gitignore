@@ -81,3 +81,9 @@ db/seed/seeded_subjects.json
 # --- Logs ---
 *.log
 *.tfplan
+
+# Playwright
+web/test-results/
+web/playwright-report/
+web/blob-report/
+web/.playwright/
