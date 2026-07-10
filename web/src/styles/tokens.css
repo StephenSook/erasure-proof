@@ -29,10 +29,13 @@
   --warn: #ffcc2a;
   --bad: #ff4b4b;
 
-  /* Monospace-dominant, forensic-console aesthetic. Real DINish / JetBrains Mono / DSEG7 @font-face
-     arrive with the beauty layer; the system mono stack keeps the plain UI offline and CSP-safe. */
+  /* Monospace-dominant, forensic-console aesthetic. All fonts are self-hosted and bundled:
+     JetBrains Mono + DSEG (via @fontsource) and DINish (OFL, vendored in src/assets/fonts). */
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans: "DINish", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "DINish Condensed", "DINish", ui-sans-serif, system-ui, sans-serif;
+  --font-lcd7: "DSEG7 Classic", var(--font-mono);
+  --font-lcd14: "DSEG14 Classic", var(--font-mono);
 
   --radius: 6px;
   --radius-lg: 10px;
