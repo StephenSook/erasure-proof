@@ -37,12 +37,19 @@ func vectorLiteral() string {
 
 type stubInverter struct {
 	resp     map[string]any
+	entered  chan struct{} // if set, InvertLive signals here AFTER the caller acquired its slot
 	liveWait chan struct{} // if set, InvertLive blocks on it (to exercise the concurrency guard)
 }
 
 func (s stubInverter) Invert(context.Context) (map[string]any, error) { return s.resp, nil }
 
 func (s stubInverter) InvertLive(_ context.Context, embeddingB64 string) (map[string]any, error) {
+	// Signaling here (not in the goroutine before the call) means the caller has already passed the
+	// semaphore + budget guards and is truly holding a slot, so the test can wait for exactly N
+	// slots to be held before probing for the busy signal.
+	if s.entered != nil {
+		s.entered <- struct{}{}
+	}
 	if s.liveWait != nil {
 		<-s.liveWait
 	}
@@ -453,27 +460,23 @@ func TestInversionLive_HourlyBudgetGuard(t *testing.T) {
 
 func TestInversionLive_ConcurrencyGuard(t *testing.T) {
 	// Two slots. Fill both with blocked calls, then a third must get ErrLiveInversionBusy.
+	// entered fires only after a call has actually acquired its slot, so we wait for both slots to
+	// be held before probing. (The probe must not itself acquire a slot and block on the gate.)
 	gate := make(chan struct{})
-	svc := demo.New(&store.Store{}, stubInverter{liveWait: gate})
+	entered := make(chan struct{}, 2)
+	svc := demo.New(&store.Store{}, stubInverter{liveWait: gate, entered: entered})
 	emb := base64.StdEncoding.EncodeToString(bytesRepeat(0x01, 3072))
 
-	started := make(chan struct{}, 2)
 	for i := 0; i < 2; i++ {
-		go func() {
-			started <- struct{}{}
-			_, _ = svc.InversionLive(context.Background(), emb)
-		}()
+		go func() { _, _ = svc.InversionLive(context.Background(), emb) }()
 	}
-	<-started
-	<-started
-	// Give the two goroutines a moment to acquire both semaphore slots before probing the third.
-	for i := 0; i < 100; i++ {
-		if _, err := svc.InversionLive(context.Background(), emb); errors.Is(err, demo.ErrLiveInversionBusy) {
-			close(gate)
-			return
-		}
-		time.Sleep(time.Millisecond)
+	<-entered // both goroutines have acquired their slots and are blocked in the stub
+	<-entered
+
+	// Both slots are held, so a third call is deterministically refused (never reaches the stub).
+	if _, err := svc.InversionLive(context.Background(), emb); !errors.Is(err, demo.ErrLiveInversionBusy) {
+		close(gate)
+		t.Fatalf("expected ErrLiveInversionBusy while both slots were held, got %v", err)
 	}
-	close(gate)
-	t.Error("expected ErrLiveInversionBusy while both slots were held")
+	close(gate) // release the two goroutines
 }
