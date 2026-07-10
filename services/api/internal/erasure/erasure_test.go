@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/StephenSook/erasure-proof/services/api/internal/chain"
 	"github.com/StephenSook/erasure-proof/services/api/internal/erasure"
@@ -133,6 +134,20 @@ func TestErase_DestroysAndRetains(t *testing.T) {
 	}
 	if res.Seq < 1 {
 		t.Errorf("seq = %d, want >= 1", res.Seq)
+	}
+	// Regression (2026-07-10 deploy rehearsal): the Result literal once dropped the scanned
+	// occurred_at, so live proofs were SIGNED with the zero time. The result must carry the
+	// decision-log row's own timestamp, exactly.
+	if res.OccurredAt.IsZero() {
+		t.Error("res.OccurredAt is the zero time; the signed proof would state no erasure time")
+	}
+	var dbOccurredAt time.Time
+	if err := st.Operator.QueryRow(context.Background(),
+		"SELECT occurred_at FROM decision_log WHERE seq = $1", res.Seq).Scan(&dbOccurredAt); err != nil {
+		t.Fatal(err)
+	}
+	if !res.OccurredAt.Equal(dbOccurredAt) {
+		t.Errorf("res.OccurredAt = %v, want the decision row's own %v", res.OccurredAt, dbOccurredAt)
 	}
 	assertErased(t, st, subjectID)
 }
