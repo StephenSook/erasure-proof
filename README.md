@@ -55,6 +55,22 @@ and [COMPLIANCE.md](COMPLIANCE.md) for the GDPR Article 17 vs EU AI Act Article 
 - AWS: KMS (the erasure mechanism), S3 Object Lock (the proof anchor), Bedrock (agent inference),
   ECS/Fargate (the always-on erasure path).
 
+## Repository layout
+
+```
+db/            schema migrations and named SQL queries (README)
+services/      api (Go) + cryptod, mcpserver, agents (Python)  (README)
+web/           React + Vite frontend                            (README)
+deploy/local/  local 3-node CockroachDB cluster + HAProxy       (README)
+infra/         IAM policies and ccloud RBAC scaffolding         (README)
+spikes/        the three week-one gating experiments + findings (README)
+tests/e2e/     end-to-end tests across the full stack           (README)
+docs/          architecture diagram, API contract, demo script  (README)
+```
+
+Each directory carries a short README describing its purpose. Top-level docs (ARCHITECTURE,
+SECURITY, COMPLIANCE) stay at the root where GitHub surfaces them.
+
 ## CockroachDB tools used
 
 (Filled in as each is wired; the hackathon requires at least two. Target: all four.)

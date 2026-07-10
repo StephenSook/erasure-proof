@@ -2,7 +2,7 @@
 
 CRDB_IMAGE ?= cockroachdb/cockroach:latest-v25.2
 LOCAL_DSN  ?= postgresql://root@localhost:26260/erasure?sslmode=disable
-COMPOSE    := docker compose -f docker-compose.crdb.yml
+COMPOSE    := docker compose -f deploy/local/docker-compose.yml
 
 .PHONY: help
 help:

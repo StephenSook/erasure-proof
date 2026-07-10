@@ -18,7 +18,7 @@ DRIVER="spikes/spike3_nodekill/erase_driver.py"
 PY="${PYTHON:-python3}"   # override with PYTHON=/path/to/venv/python to get psycopg
 
 echo "== bringing up 3-node cluster + haproxy =="
-docker compose -f docker-compose.crdb.yml up -d
+docker compose -f deploy/local/docker-compose.yml up -d
 echo "== waiting for cluster ready =="
 for i in $(seq 1 40); do
   if docker exec roach1 ./cockroach sql --insecure -e "SELECT 1" >/dev/null 2>&1; then break; fi
@@ -68,4 +68,4 @@ done
 echo ""
 echo "=== SPIKE 3 VERDICT: $PASSES/3 runs survived the node kill ==="
 echo "Record the result, the variant used, and whether catch-up worked in findings.md"
-echo "(Leave the cluster up for the recording, or 'docker compose -f docker-compose.crdb.yml down -v' to clean up.)"
+echo "(Leave the cluster up for the recording, or 'docker compose -f deploy/local/docker-compose.yml down -v' to clean up.)"

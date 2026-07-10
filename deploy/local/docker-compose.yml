@@ -83,7 +83,7 @@ services:
     image: haproxy:2.9
     container_name: roach-haproxy
     volumes:
-      - ./infra/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
     ports:
       - "26260:26257"   # balanced SQL endpoint used by the app and the node-kill demo
       - "8090:8080"     # HAProxy stats
