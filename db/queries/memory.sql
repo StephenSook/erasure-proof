@@ -22,8 +22,13 @@ RETURNING id;
 SELECT EXISTS (SELECT 1 FROM subject_keys WHERE subject_id = $1);
 
 -- name: get_memory_ciphertext
--- Fetch the durable ciphertext for a subject (used by the forensics decrypt-attempt).
-SELECT id, content_ciphertext, embedding_ciphertext, nonce_content, nonce_embedding, wrapped_key
+-- Fetch the durable ciphertext for a subject (used by the forensics decrypt-attempt). aad_context
+-- carries the exact AAD bytes the row was encrypted with (subject_id || chain head at write time).
+-- MIGRATION NOTE for any decrypt consumer: rows written before the chain-binding change have
+-- aad_context NULL; their actual AAD is the subject_id bytes alone (identical to the genesis
+-- format). Treat NULL as that fallback or every legacy row will misread as undecryptable.
+SELECT id, content_ciphertext, embedding_ciphertext, nonce_content, nonce_embedding, wrapped_key,
+       aad_context
 FROM agent_memory
 WHERE subject_id = $1;
 

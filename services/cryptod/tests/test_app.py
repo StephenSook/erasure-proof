@@ -165,3 +165,65 @@ def test_prepare_two_level_envelope_and_erasure():
             envelope.new_subject_key(),
             envelope.RowKeyMaterial(wrapped=b64.b64decode(p["row_wrapped_key"])),
         )
+
+
+@mock_aws
+def test_prepare_binds_aad_to_chain_head():
+    """The ciphertext is bound to subject_id || chain_head: decrypt succeeds only with the exact
+    AAD returned by /prepare, and fails InvalidTag under a tampered chain head."""
+    import base64 as b64
+
+    import pytest
+    from cryptography.exceptions import InvalidTag
+
+    from cryptod import aead, envelope, kms
+
+    key_arn = boto3.client("kms", region_name="us-east-1").create_key()["KeyMetadata"]["Arn"]
+    cfg = settings.Settings(
+        aws_region="us-east-1",
+        kms_wrapping_key_arn=key_arn,
+        s3_proof_bucket="proofs",
+        s3_object_lock_mode="GOVERNANCE",
+        s3_retain_days=1,
+        ecdsa_signing_key_path="",
+    )
+    client = TestClient(create_app(cfg))
+    head = "ab" * 32  # a 32-byte chain head, hex
+    p = client.post(
+        "/prepare",
+        json={
+            "subject_id": "s1",
+            "content": b64.b64encode(b"bound to history").decode(),
+            "embedding": b64.b64encode(b"\x11" * 3072).decode(),
+            "chain_head": head,
+        },
+    ).json()
+    aad = b64.b64decode(p["aad"])
+    assert aad == b"s1" + bytes.fromhex(head)
+
+    k = kms.KMS("us-east-1")
+    subject_key = k.decrypt_data_key(b64.b64decode(p["subject_wrapped_key"]), "s1")
+    row_key = envelope.unwrap_data_key(
+        subject_key, envelope.RowKeyMaterial(wrapped=b64.b64decode(p["row_wrapped_key"]))
+    )
+    ct = aead.Ciphertext(
+        nonce=b64.b64decode(p["nonce_content"]), ct=b64.b64decode(p["content_ciphertext"])
+    )
+    # Exact AAD: decrypts.
+    assert aead.decrypt(row_key, ct, aad=aad) == b"bound to history"
+    # Tampered history (different chain head): InvalidTag, even with the right key.
+    tampered = b"s1" + bytes.fromhex("cd" * 32)
+    with pytest.raises(InvalidTag):
+        aead.decrypt(row_key, ct, aad=tampered)
+
+    # Malformed hex is a 400, not a 500.
+    r = client.post(
+        "/prepare",
+        json={
+            "subject_id": "s1",
+            "content": b64.b64encode(b"x").decode(),
+            "embedding": b64.b64encode(b"\x11" * 3072).decode(),
+            "chain_head": "not-hex",
+        },
+    )
+    assert r.status_code == 400

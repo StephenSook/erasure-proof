@@ -40,6 +40,13 @@ class PrepareRequest(BaseModel):
     subject_id: str
     content: str  # base64
     embedding: str  # base64 (raw float32 bytes of the GTR vector)
+    # Optional hex of the decision-log chain head at write time (empty at genesis). When present,
+    # the AAD becomes subject_id || chain_head. Precise claim: an AAD reconstructed from a TAMPERED
+    # history fails InvalidTag; the exact bytes are also stored with the row (aad_context), which
+    # makes the binding verifiable against the log but does not make decryption depend on the log's
+    # current state. cryptod is inside the trust boundary: the caller cross-checks the returned AAD
+    # bytes but cannot detect a cryptod that encrypts under different bytes than it returns.
+    chain_head: str = ""
 
 
 class ShredRequest(BaseModel):
@@ -117,7 +124,17 @@ def create_app(cfg: settings.Settings | None = None) -> FastAPI:
         )
         row_key = envelope.new_data_key()
         row_material = envelope.wrap_data_key(subject.plaintext, row_key)
-        aad = req.subject_id.encode()
+        # AAD = subject_id || chain_head: the ciphertext is bound to both the person and the
+        # decision-log state at write time. The head is a SHA-256, so exactly 64 hex chars (or
+        # empty at genesis); the length check also rejects whitespace-containing hex (bytes.fromhex
+        # silently accepts it) and caps the field. Malformed input is a caller error, not a 500.
+        if req.chain_head and len(req.chain_head) != 64:
+            raise HTTPException(400, "chain_head must be empty or 64 hex chars")
+        try:
+            chain_head = bytes.fromhex(req.chain_head) if req.chain_head else b""
+        except ValueError as e:
+            raise HTTPException(400, "chain_head must be hex") from e
+        aad = req.subject_id.encode() + chain_head
         content_ct = aead.encrypt(row_key, _b64d(req.content), aad)
         embedding_ct = aead.encrypt(row_key, _b64d(req.embedding), aad)
         # subject.plaintext and row_key go out of scope here; only wrapped copies are returned.
@@ -134,6 +151,9 @@ def create_app(cfg: settings.Settings | None = None) -> FastAPI:
             # orchestrator branches on this for the imported-material kill switch, so it is reported
             # explicitly rather than inferred downstream.
             "key_origin": "GENERATE_DATA_KEY",
+            # The exact AAD bytes used, returned so the caller stores them verbatim in the row
+            # (agent_memory.aad_context); any future decrypt must present these exact bytes.
+            "aad": _b64e(aad),
         }
 
     @app.post("/shred")

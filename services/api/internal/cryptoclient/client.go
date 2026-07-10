@@ -18,6 +18,9 @@ type PrepareRequest struct {
 	SubjectID string `json:"subject_id"`
 	Content   string `json:"content"`   // base64
 	Embedding string `json:"embedding"` // base64
+	// ChainHead is the hex decision-log chain head at write time (empty at genesis). cryptod binds
+	// it into the AAD (subject_id || chain_head), tying the ciphertext to the audit-log state.
+	ChainHead string `json:"chain_head,omitempty"`
 }
 
 // PrepareResponse carries the ciphertexts and the two-level wrapped keys to store: the KMS-wrapped
@@ -36,6 +39,9 @@ type PrepareResponse struct {
 	// is stored verbatim because the erasure path branches on it for the imported-material kill
 	// switch; the ingest layer must not assume it.
 	KeyOrigin string `json:"key_origin"`
+	// AAD is the exact associated-data bytes used (base64 of subject_id || chain_head); stored
+	// verbatim in agent_memory.aad_context so any future decrypt presents the same bytes.
+	AAD string `json:"aad"`
 }
 
 // ShredResponse reports the imported-material kill switch outcome.

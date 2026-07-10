@@ -101,7 +101,8 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, ingest.ErrAlreadyProvisioned):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "subject already provisioned"})
 		return
-	case errors.Is(err, ingest.ErrBadEmbedding), errors.Is(err, ingest.ErrBadContent):
+	case errors.Is(err, ingest.ErrBadEmbedding), errors.Is(err, ingest.ErrBadContent),
+		errors.Is(err, ingest.ErrBadSubjectID):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	case err != nil:

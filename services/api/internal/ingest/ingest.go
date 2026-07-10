@@ -4,6 +4,7 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -44,10 +45,13 @@ const (
 	qSubjectKeyExists    = "subject_key_exists"
 	qInsertSubjectKey    = "insert_subject_key"
 	qInsertMemory        = "insert_memory"
+	qChainHead           = "chain_head"
 )
 
 // RequiredQueries is the set of named statements Ingest looks up; require it at startup.
-var RequiredQueries = []string{qErasureRecordExists, qSubjectKeyExists, qInsertSubjectKey, qInsertMemory}
+var RequiredQueries = []string{
+	qErasureRecordExists, qSubjectKeyExists, qInsertSubjectKey, qInsertMemory, qChainHead,
+}
 
 var (
 	// ErrSubjectErased means the subject has an erasure record; re-adding memory would resurrect it.
@@ -59,6 +63,11 @@ var (
 	ErrBadEmbedding = errors.New("invalid embedding")
 	// ErrBadContent means the caller-supplied content is not valid base64. Client error.
 	ErrBadContent = errors.New("invalid content")
+	// ErrBadSubjectID means the caller-supplied subject_id is not a canonical UUID. It is rejected
+	// BEFORE encryption because the subject id is baked into the AAD: a non-canonical spelling
+	// (uppercase, braced, hyphenless) would store an aad_context whose prefix disagrees with the
+	// normalized UUID column, a landmine for any future decrypt or verifier.
+	ErrBadSubjectID = errors.New("subject_id must be a canonical lowercase UUID")
 	// ErrBadCryptoMaterial means cryptod returned material of an unexpected shape (wrong length,
 	// empty field, or unknown key origin). It is an internal failure: storing it would silently
 	// corrupt the row or hollow out the proof, so ingest refuses before opening the transaction.
@@ -92,6 +101,7 @@ type prepared struct {
 	embeddingCT    []byte
 	nonceContent   []byte
 	nonceEmbedding []byte
+	aad            []byte
 	keyOrigin      string
 	kmsKeyARN      string
 }
@@ -106,6 +116,12 @@ func (in *Ingester) Ingest(ctx context.Context, subjectID, content, embeddingB64
 			return Result{}, err
 		}
 		subjectID = id
+	} else {
+		canonical, err := canonicalUUID(subjectID)
+		if err != nil {
+			return Result{}, err
+		}
+		subjectID = canonical
 	}
 	vec, err := vectorLiteral(embeddingB64)
 	if err != nil {
@@ -116,10 +132,24 @@ func (in *Ingester) Ingest(ctx context.Context, subjectID, content, embeddingB64
 		return Result{}, fmt.Errorf("%w: not base64: %v", ErrBadContent, err)
 	}
 
+	// The decision-log chain head at write time binds this ciphertext to the audit-log state (AAD =
+	// subject_id || chain_head). Read it BEFORE the transaction: the head may advance before the
+	// insert commits, which is fine, because the binding is to the head at ENCRYPTION time and the
+	// exact bytes are stored with the row. pgx.ErrNoRows = genesis (no log rows yet, empty head).
+	var chainHead []byte
+	{
+		var seq int64
+		e := in.pool.QueryRow(ctx, in.q.MustGet(qChainHead)).Scan(&seq, &chainHead)
+		if e != nil && !errors.Is(e, pgx.ErrNoRows) {
+			return Result{}, fmt.Errorf("read chain head: %w", e)
+		}
+	}
+
 	// Encrypt via cryptod. This network call happens BEFORE the transaction, so nothing impure runs
 	// inside the retried closure.
 	resp, err := in.crypto.Prepare(ctx, cryptoclient.PrepareRequest{
 		SubjectID: subjectID, Content: content, Embedding: embeddingB64,
+		ChainHead: hex.EncodeToString(chainHead),
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("prepare: %w", err)
@@ -127,6 +157,12 @@ func (in *Ingester) Ingest(ctx context.Context, subjectID, content, embeddingB64
 	p, err := decodePrepared(resp)
 	if err != nil {
 		return Result{}, err
+	}
+	// The AAD must be exactly subject_id || chain_head as sent; anything else means cryptod bound
+	// the ciphertext to the wrong context and a future decrypt-with-stored-AAD would silently
+	// present the wrong binding.
+	if !bytes.Equal(p.aad, append([]byte(subjectID), chainHead...)) {
+		return Result{}, fmt.Errorf("%w: aad does not match subject_id||chain_head", ErrBadCryptoMaterial)
 	}
 
 	res := Result{SubjectID: subjectID}
@@ -154,10 +190,11 @@ func (in *Ingester) Ingest(ctx context.Context, subjectID, content, embeddingB64
 			return fmt.Errorf("insert subject key: %w", e)
 		}
 		var memID string
-		// aad_context is a should-build binding not yet populated on the ingest path; store NULL.
+		// aad_context stores the exact AAD bytes (subject_id || chain head at write time), so any
+		// future decrypt presents the same binding without reassembling it.
 		if e := tx.QueryRow(ctx, in.q.MustGet(qInsertMemory),
 			subjectID, p.contentCT, vec, p.embeddingCT, p.nonceContent, p.nonceEmbedding,
-			p.rowWrapped, []byte(nil)).Scan(&memID); e != nil {
+			p.rowWrapped, p.aad).Scan(&memID); e != nil {
 			return fmt.Errorf("insert memory: %w", e)
 		}
 		res.MemoryID = memID
@@ -189,6 +226,9 @@ func decodePrepared(resp cryptoclient.PrepareResponse) (prepared, error) {
 	}
 	if p.nonceEmbedding, err = base64.StdEncoding.DecodeString(resp.NonceEmbedding); err != nil {
 		return p, fmt.Errorf("decode nonce_embedding: %w", err)
+	}
+	if p.aad, err = base64.StdEncoding.DecodeString(resp.AAD); err != nil {
+		return p, fmt.Errorf("decode aad: %w", err)
 	}
 	p.kmsKeyARN = resp.KMSKeyARN
 	p.keyOrigin = resp.KeyOrigin
@@ -267,6 +307,29 @@ func vectorLiteral(embeddingB64 string) (string, error) {
 	}
 	sb.WriteByte(']')
 	return sb.String(), nil
+}
+
+// canonicalUUID accepts ONLY the standard lowercase-or-uppercase 8-4-4-4-12 form and returns it
+// lowercased. Braced and hyphenless spellings (which CockroachDB would also accept) are rejected
+// deliberately: the AAD's no-ambiguity argument rests on the subject prefix being exactly 36 bytes.
+func canonicalUUID(s string) (string, error) {
+	if len(s) != 36 {
+		return "", ErrBadSubjectID
+	}
+	lower := strings.ToLower(s)
+	for i := 0; i < len(lower); i++ {
+		c := lower[i]
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return "", ErrBadSubjectID
+			}
+			continue
+		}
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return "", ErrBadSubjectID
+		}
+	}
+	return lower, nil
 }
 
 func newUUIDv4() (string, error) {

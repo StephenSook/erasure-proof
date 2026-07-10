@@ -28,6 +28,15 @@ defend, and every limitation is stated proactively.
 - The plaintext embedding is live-serving state only. Durable copies (backups, MVCC history,
   replica disks, exports) contain only ciphertext. Erasure NULLs the live vector and destroys the
   key, so both the ciphertext-at-rest and the MVCC history become unreadable.
+- Every ciphertext is bound to its audit context via AES-GCM associated data: AAD =
+  `subject_id || decision-log chain head at write time`, with the exact bytes retained in
+  `agent_memory.aad_context`. Decryption requires presenting that binding, so a ciphertext cannot
+  be silently re-attributed to a different subject or divorced from the log state it was written
+  under. The binding is to the head at encryption time (later log growth does not invalidate it).
+  Precise scope: an AAD reconstructed from a tampered history fails InvalidTag; storing the exact
+  bytes makes the binding verifiable against the log, it does not make decryption depend on the
+  log's current state. The AAD proves the writer observed that head, not that it was still the
+  head at commit.
 - The agent role cannot read or destroy keys (no grants on `subject_keys`) and cannot rewrite the
   decision log. The operator role can erase but cannot rewrite history. The forensics role is
   SELECT-only.
