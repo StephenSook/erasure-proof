@@ -15,6 +15,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 DSN_HAPROXY="postgresql://root@localhost:26260/defaultdb?sslmode=disable"
 DRIVER="spikes/spike3_nodekill/erase_driver.py"
+PY="${PYTHON:-python3}"   # override with PYTHON=/path/to/venv/python to get psycopg
 
 echo "== bringing up 3-node cluster + haproxy =="
 docker compose -f docker-compose.crdb.yml up -d
@@ -26,25 +27,33 @@ done
 
 echo "== creating database + applying migrations =="
 docker exec roach1 ./cockroach sql --insecure -e "CREATE DATABASE IF NOT EXISTS erasure"
-DSN="postgresql://root@localhost:26260/erasure?sslmode=disable"
-python3 "$DRIVER" migrate "$DSN"
+# Connect directly to roach1 (host port 26257). roach1 is never the node we kill, so the
+# commit-then-kill variant proves Raft durability from a surviving replica. HAProxy (26260)
+# is available for the mid-flight variant but needs a few seconds to mark backends up.
+DSN="postgresql://root@localhost:26257/erasure?sslmode=disable"
+echo "== waiting for host SQL port 26257 =="
+for i in $(seq 1 30); do
+  if "$PY" -c "import psycopg,sys; psycopg.connect('$DSN').close()" >/dev/null 2>&1; then break; fi
+  sleep 2
+done
+"$PY" "$DRIVER" migrate "$DSN"
 
 PASSES=0
 for run in 1 2 3; do
-  SUBJ=$(python3 -c "import uuid; print(uuid.uuid4())")
+  SUBJ=$("$PY" -c "import uuid; print(uuid.uuid4())")
   echo ""
   echo "== run $run: subject $SUBJ =="
-  python3 "$DRIVER" seed "$DSN" "$SUBJ"
+  "$PY" "$DRIVER" seed "$DSN" "$SUBJ"
 
-  echo "-- erasing (through HAProxy) --"
-  python3 "$DRIVER" erase "$DSN" "$SUBJ"
+  echo "-- erasing (direct to roach1, a node we never kill) --"
+  "$PY" "$DRIVER" erase "$DSN" "$SUBJ"
 
   echo "-- killing roach2 --"
   docker stop roach2 >/dev/null
   sleep 3
 
   echo "-- verifying committed state from surviving replicas (roach1/roach3) --"
-  if python3 "$DRIVER" verify "$DSN" "$SUBJ"; then
+  if "$PY" "$DRIVER" verify "$DSN" "$SUBJ"; then
     PASSES=$((PASSES+1))
     echo "run $run: committed erasure survived the node kill"
   else

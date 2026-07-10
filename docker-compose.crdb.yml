@@ -27,7 +27,7 @@ services:
       - "26257:26257"   # SQL, direct to node 1 (HAProxy is the recommended endpoint on 26260)
       - "8081:8080"     # DB console for the on-camera replica view
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health?ready=1"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -42,7 +42,7 @@ services:
     ports:
       - "8082:8080"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health?ready=1"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -57,7 +57,7 @@ services:
     ports:
       - "8083:8080"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health?ready=1"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 5s
       timeout: 3s
       retries: 20
