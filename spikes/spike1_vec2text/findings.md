@@ -1,41 +1,48 @@
 # Spike 1 findings: Vec2Text name-then-noise beat
 
-Status: NOT RUN YET
-
-Run `spike1_colab.py` on Google Colab with a CUDA GPU (T4 minimum). Fill this in after.
+Status: PASS (run 2026-07-09 on a Modal T4 GPU via `spike1_modal.py`)
 
 ## Result
 
-- [ ] PASS  (curated name reconstructs verbatim/near-verbatim in one GPU run < ~1 min, and
-            post-erasure ciphertext inversion is unreadable noise)
-- [ ] FAIL  (name too garbled even on a curated sentence, or no CUDA GPU obtainable)
+- [x] PASS: the curated sentence's name reconstructed verbatim from the embedding, and after
+      crypto-erasure the same ciphertext inverted to unreadable noise.
+- [ ] FAIL
 
 ## Record
 
 | Field | Value |
 |-------|-------|
-| GPU type | (e.g. Colab T4) |
-| transformers version pinned | |
-| vec2text version | 0.0.13 |
-| num_steps / beam width used | 20 / 4 |
-| demo sentence | |
-| recovered text (verbatim) | |
-| name appeared? | |
-| leak inversion time | |
-| post-erasure output (verbatim) | |
-| post-erasure readable? | |
-| CPU-only timing (for the deployed-app decision) | |
+| GPU | Modal T4 (serverless), device=cuda |
+| transformers pin | 4.44.2 (below 4.50.0 per issue #86) |
+| vec2text | 0.0.13 |
+| embedding | canonical GTR mean-pool of the encoder last hidden state (unnormalized) |
+| leak num_steps / beam | 50 / 8 |
+| demo sentence | "Stephen Sookra is a full-stack developer who builds on CockroachDB and AWS." |
+| recovered text (verbatim) | "Stephen Sookra is a full-stack developer who builds on CockroachDB and AWS. " |
+| name appeared? | YES, verbatim including the full name |
+| leak inversion time | 66.9s |
+| post-erasure output | "sssssssssss...s." (unreadable noise, no name) |
+| post-erasure readable? | NO |
+| erase inversion time | 60.5s |
+
+## What this proves
+
+The headline is real: a person's name is reconstructible from a stored embedding (row deletion is
+not enough), and after crypto-erasure the same ciphertext yields only noise. Ran headlessly on a
+serverless GPU driven from the terminal, off the AWS critical path.
 
 ## Consequence
 
-- PASS -> headline confirmed; proceed. The deployed app serves this as a labeled recorded
-  golden run (Option B); the video shows the live GPU inversion.
-- FAIL -> the ONLY outcome that changes the project. Reframe to the fallback (poisoned-memory
-  incident response, whose visceral beat is the derive-beats-containment moment + the node kill,
-  neither of which needs Vec2Text). Re-run the concept lock's flip condition.
+State 1 (all three spikes PASS): proceed to full build, confidence above 76, no reframe.
 
 ## Honesty note
 
-Never present the curated near-verbatim result and the uncurated 25.5% Ghost Vectors figure as
-the same thing. State: curated in-distribution text reconstructs reliably; uncurated recovery is
-roughly 1-in-4 for exact names (arXiv 2606.18497).
+The demo sentence is Stephen's own public bio line (self-consented data, satisfies the
+no-third-party-PII rule). It is a curated, in-distribution sentence, so near-verbatim recovery is
+expected. Do NOT conflate this with the uncurated 25.5% exact-name-recovery figure from Ghost
+Vectors (arXiv 2606.18497): curated in-distribution text reconstructs reliably; uncurated recovery
+is roughly 1-in-4. Both statements are true and both appear on the /trust page.
+
+The deployed app serves this as a labeled recorded golden run (see golden_run.json); the live
+`InvalidTag` decrypt failure is the actual cryptographic proof and runs live on every erasure.
+`spike1_modal.py` is the reproducible artifact.

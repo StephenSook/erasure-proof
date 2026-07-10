@@ -1,0 +1,14 @@
+{
+  "note": "Recorded golden run of the Vec2Text name-then-noise beat. Genuine output from spike1_modal.py on a Modal T4 GPU. The deployed app serves this under a 'recorded golden run' label; the live InvalidTag decrypt failure is the actual cryptographic proof and runs live. Reproduce with: modal run spikes/spike1_vec2text/spike1_modal.py",
+  "gpu": "Modal T4 (serverless)",
+  "recorded_at": "2026-07-09",
+  "model": "sentence-transformers/gtr-t5-base (768-dim), vec2text 0.0.13, transformers 4.44.2",
+  "leak_num_steps": 50,
+  "leak_sequence_beam_width": 8,
+  "sentence": "Stephen Sookra is a full-stack developer who builds on CockroachDB and AWS.",
+  "recovered_text": "Stephen Sookra is a full-stack developer who builds on CockroachDB and AWS. ",
+  "leak_seconds": 66.9,
+  "post_erasure_text": "sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss.",
+  "erase_seconds": 60.5,
+  "consent": "The sentence is the author's own public bio line (self-consented data)."
+}
