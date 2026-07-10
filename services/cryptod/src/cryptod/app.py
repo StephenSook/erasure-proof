@@ -14,14 +14,18 @@ body detection.
 """
 
 import base64
+import binascii
 import hashlib
+import logging
 
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel
 
 from . import aead, anchor, kms, proof, settings, signing
+
+log = logging.getLogger("cryptod")
 
 
 def _b64d(s: str) -> bytes:
@@ -65,7 +69,18 @@ def _load_signer(cfg: settings.Settings) -> ec.EllipticCurvePrivateKey:
         if not isinstance(key, ec.EllipticCurvePrivateKey):
             raise TypeError("configured signing key is not an EC private key")
         return key
-    # Ephemeral dev key; production sets ECDSA_SIGNING_KEY_PATH (or uses KMS asymmetric sign).
+    # No configured key. An ephemeral key vanishes on restart, so proofs it signs can never be
+    # attributed later. Fail closed when anchoring to immutable COMPLIANCE storage; otherwise warn
+    # loudly so an ephemeral signer is never mistaken for a configured one.
+    if cfg.s3_object_lock_mode == "COMPLIANCE":
+        raise RuntimeError(
+            "ECDSA_SIGNING_KEY_PATH is required with COMPLIANCE Object Lock: an ephemeral signer "
+            "would write permanently-locked proofs signed by a key that is lost on restart"
+        )
+    log.warning(
+        "cryptod: no ECDSA_SIGNING_KEY_PATH set; using an EPHEMERAL signer. Proofs will NOT verify "
+        "across restarts. Set ECDSA_SIGNING_KEY_PATH for anything but local development."
+    )
     return signing.generate_private_key()
 
 
@@ -98,9 +113,16 @@ def create_app(cfg: settings.Settings | None = None) -> FastAPI:
         }
 
     @app.post("/shred")
-    def shred(req: ShredRequest) -> dict:
+    def shred(req: ShredRequest, response: Response) -> dict:
+        # The delete itself propagates on failure (500). A non-PendingImport result here means the
+        # material was deleted but confirmation is still lagging (KMS eventual consistency), NOT
+        # that erasure failed, so we return 202 with an explicit pending status rather than a
+        # misleading destroyed:false.
         state = kms.KMS(cfg.aws_region).destroy_imported_key(req.key_arn)
-        return {"key_state": state, "destroyed": state == "PendingImport"}
+        if state == "PendingImport":
+            return {"destroyed": True, "key_state": state}
+        response.status_code = 202
+        return {"destroyed": False, "status": "pending_confirmation", "key_state": state}
 
     @app.post("/anchor")
     def anchor_proof(req: AnchorRequest) -> dict:
@@ -131,9 +153,15 @@ def create_app(cfg: settings.Settings | None = None) -> FastAPI:
 
     @app.post("/proof/verify")
     def verify(req: VerifyRequest) -> dict:
-        pub = signing.load_public_key_pem(req.public_key_pem)
+        # A bad signature is a legitimate valid:false. Malformed input (bad PEM, bad base64) is a
+        # caller error (400), not a server fault (500) and not a false valid:false.
         try:
-            proof.verify_proof(pub, req.proof, _b64d(req.signature))
+            pub = signing.load_public_key_pem(req.public_key_pem)
+            signature = _b64d(req.signature)
+        except (ValueError, binascii.Error) as e:
+            raise HTTPException(400, f"malformed input: {type(e).__name__}") from e
+        try:
+            proof.verify_proof(pub, req.proof, signature)
         except signing.InvalidSignature:
             return {"valid": False}
         return {"valid": True}

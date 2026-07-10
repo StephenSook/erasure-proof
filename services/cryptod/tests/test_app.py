@@ -75,3 +75,38 @@ def test_prepare_anchor_verify_flow():
         json={"proof": tampered, "signature": anchored["signature"], "public_key_pem": pub},
     ).json()
     assert bad["valid"] is False
+
+
+def test_compliance_mode_requires_configured_signing_key():
+    # An ephemeral signer plus immutable COMPLIANCE storage is a trap; create_app must fail closed.
+    import pytest
+
+    from cryptod.app import create_app
+
+    cfg = settings.Settings(
+        aws_region="us-east-1",
+        kms_wrapping_key_arn="",
+        s3_proof_bucket="proofs",
+        s3_object_lock_mode="COMPLIANCE",
+        s3_retain_days=1,
+        ecdsa_signing_key_path="",
+    )
+    with pytest.raises(RuntimeError):
+        create_app(cfg)
+
+
+def test_verify_rejects_malformed_input():
+    cfg = settings.Settings(
+        aws_region="us-east-1",
+        kms_wrapping_key_arn="",
+        s3_proof_bucket="proofs",
+        s3_object_lock_mode="GOVERNANCE",
+        s3_retain_days=1,
+        ecdsa_signing_key_path="",
+    )
+    client = TestClient(create_app(cfg))
+    r = client.post(
+        "/proof/verify",
+        json={"proof": {}, "signature": "not-base64!!", "public_key_pem": "not a pem"},
+    )
+    assert r.status_code == 400
