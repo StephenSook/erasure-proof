@@ -40,6 +40,11 @@ npm run ios         # iOS simulator (needs Xcode)
 npm run android     # Android emulator or a connected device
 ```
 
+`npm run ios` opens the app in Expo Go on a booted simulator. Because the app has no custom native
+module (the crypto is pure-JS `@noble/curves`), it runs in Expo Go directly with no CocoaPods or
+native build step. Verified on an iPhone 17 Pro simulator: Load demo certificate renders SIGNATURE
+VALID with the recognized-signer banner and the signed facts.
+
 ## Android APK (installable, no store)
 
 The truly downloadable artifact. With EAS:
