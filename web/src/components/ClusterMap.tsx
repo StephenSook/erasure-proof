@@ -1,3 +1,4 @@
+import { animate, createDrawable, stagger } from 'animejs'
 import { useEffect, useRef } from 'react'
 import { motionEnabled } from '../motion'
 
@@ -23,18 +24,28 @@ export function ClusterMap() {
     if (!svg || !motionEnabled()) {
       return // reduced motion / tests: the static markup already shows the settled healthy state
     }
-    // Choreograph the kill and rejoin with plain timeouts (no library needed): roach2 goes down,
-    // the survivors pulse to show they still serve, then roach2 rejoins.
+    // The Raft replication links draw themselves in (anime.js createDrawable), so the cluster
+    // assembles before the kill choreography. Purely decorative; the links are visible instantly
+    // under reduced motion (this effect never runs there).
+    const drawn = animate(createDrawable('.clustermap__links line'), {
+      draw: ['0 0', '0 1'],
+      duration: 600,
+      delay: stagger(120),
+      ease: 'inOutQuad',
+    })
+    // Choreograph the kill and rejoin with plain timeouts: roach2 goes down, the survivors hold
+    // quorum, then roach2 rejoins.
     const set = (id: string, cls: string) => {
       const el = svg.querySelector<SVGGElement>(`[data-node="${id}"]`)
       if (el) el.dataset.state = cls
     }
     set('roach2', 'leader') // start healthy, then kill after a beat
-    const t1 = window.setTimeout(() => set('roach2', 'down'), 900)
-    const t2 = window.setTimeout(() => set('roach2', 'follower'), 3200) // rejoins, catches up
+    const t1 = window.setTimeout(() => set('roach2', 'down'), 1100)
+    const t2 = window.setTimeout(() => set('roach2', 'follower'), 3400) // rejoins, catches up
     return () => {
       window.clearTimeout(t1)
       window.clearTimeout(t2)
+      drawn.revert()
     }
   }, [])
 
