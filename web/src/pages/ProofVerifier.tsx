@@ -249,6 +249,11 @@ export function ProofVerifier() {
       {status.kind === 'verified' && (
         <>
           <div className="verifier__verdict">SIGNATURE VERIFIED</div>
+          <div className="verifier__actions">
+            <button className="btn btn--small" onClick={() => downloadProof(status.proof)}>
+              Download the signed proof (.json)
+            </button>
+          </div>
           <KeyValue items={signedItems(status)} />
           <div className="note">
             Server-asserted (not covered by the signature): committed{' '}
@@ -269,6 +274,27 @@ export function ProofVerifier() {
       )}
     </div>
   )
+}
+
+// downloadProof saves the erasure proof as the judge takes it away: the exact signed canonical
+// bytes, the signature, and the signer public key, so anyone can re-verify offline against the
+// same code the page runs. This is the erasure certificate, the delivered artifact.
+function downloadProof(proof: ProofView) {
+  const doc = {
+    proof: proof.proof_body ? JSON.parse(proof.proof_body) : null,
+    proof_canonical: proof.proof_body, // the exact bytes the signature covers
+    signature_b64: proof.proof_signature,
+    signer_public_key_pem: proof.signer_pubkey_pem,
+    proof_ref: proof.proof_ref,
+    committed_at: proof.committed_at,
+  }
+  const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `erasure-proof-${proof.subject_id}.json`
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 function transparencyPanel(t: Transparency) {
