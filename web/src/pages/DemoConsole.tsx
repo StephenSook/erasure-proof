@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Badge } from '../components/Badge'
 import { ClusterMap } from '../components/ClusterMap'
 import { CodeBlock } from '../components/CodeBlock'
+import { CopyCurl } from '../components/CopyCurl'
 import { KeyValue, type KV } from '../components/KeyValue'
 import { LcdCounter } from '../components/LcdCounter'
 import { Stage } from '../components/Stage'
@@ -502,12 +503,20 @@ export function DemoConsole() {
         return (
           <>
             {state.chain && (
-              <KeyValue
-                items={[
-                  { k: 'hash chain', v: state.chain.intact ? 'intact' : `BROKEN at seq ${String(state.chain.break_at_seq)}`, tone: state.chain.intact ? 'ok' : 'bad' },
-                  { k: 'rows checked', v: String(state.chain.checked) },
-                ]}
-              />
+              <>
+                <KeyValue
+                  items={[
+                    { k: 'hash chain', v: state.chain.intact ? 'intact' : `BROKEN at seq ${String(state.chain.break_at_seq)}`, tone: state.chain.intact ? 'ok' : 'bad' },
+                    { k: 'rows checked', v: String(state.chain.checked) },
+                  ]}
+                />
+                <div className="note">
+                  These read-only checks are plain API calls. Copy either as curl and run it against
+                  the deployed API to get the same result yourself.{' '}
+                  <CopyCurl method="POST" path="/api/verify-chain" body={{}} label="verify-chain" />{' '}
+                  <CopyCurl method="POST" path="/api/rbac-demo" body={{}} label="rbac-demo" />
+                </div>
+              </>
             )}
             {liveTimeline()}
             {state.rbac && (

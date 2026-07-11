@@ -102,6 +102,11 @@ button {
     animation: none;
   }
 }
+.verifier__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .mono {
   font-family: var(--font-mono);
 }
@@ -129,11 +134,13 @@ button {
   display: flex;
   align-items: baseline;
   gap: 12px;
+  min-width: 0; /* shrink the brand instead of pushing the nav off-screen */
 }
 .header__mark {
   color: var(--fg-0);
   font-weight: 700;
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 .header__mark b {
   color: var(--hue-turquoise);
@@ -145,6 +152,23 @@ button {
 .header__nav {
   display: flex;
   gap: 4px;
+}
+/* Narrow screens: stack the brand above the nav and let the nav wrap so a phone never clips a nav
+   item. The secondary tagline hides to save the row. */
+@media (max-width: 560px) {
+  .header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 10px 14px;
+  }
+  .header__tag {
+    display: none;
+  }
+  .header__nav {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
 }
 .header__nav a {
   color: var(--fg-2);
