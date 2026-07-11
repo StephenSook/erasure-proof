@@ -656,6 +656,13 @@ button {
   opacity: 1;
   transform: none;
 }
+/* Motion-on scroll-scrub path: the container is instantly visible with no CSS reveal; anime.js
+   scrubs the child eyebrow/title/body/cta in as the section scrolls through the viewport. */
+.lp-section--scrub {
+  opacity: 1;
+  transform: none;
+  transition: none;
+}
 .lp-section__eyebrow {
   color: var(--hue);
   font-size: 12px;
