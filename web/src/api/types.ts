@@ -151,7 +151,6 @@ export interface AgentConfig {
 // from the recent past with AS OF SYSTEM TIME.
 export interface TimeTravelView {
   subject_id: string
-  memory_id: string
   as_of: string
   normal_read_rows: number
   time_travel_rows: number

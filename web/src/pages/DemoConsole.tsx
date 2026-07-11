@@ -317,7 +317,7 @@ export function DemoConsole() {
           <>
             <KeyValue
               items={[
-                { k: 'throwaway row', v: `${short(tt.memory_id, 16)} inserted, then DELETEd` },
+                { k: 'wrapped-key row', v: `subject ${short(tt.subject_id, 16)} inserted, then DELETEd` },
                 { k: 'normal read now', v: `${tt.normal_read_rows} rows ("gone")`, tone: 'ok' },
                 {
                   k: `AS OF SYSTEM TIME`,

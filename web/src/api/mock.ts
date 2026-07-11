@@ -178,12 +178,11 @@ export function createMockClient(): DemoApi {
       // readable AS OF SYSTEM TIME within the GC window. On the deployed console this runs live.
       return {
         subject_id: '33333333-4444-4555-8666-777777777777',
-        memory_id: 'cccccccc-0000-4000-8000-000000000003',
         as_of: '1760000000000000000.0000000001',
         normal_read_rows: 0,
         time_travel_rows: 1,
         gc_note:
-          'AS OF SYSTEM TIME reads MVCC history within the garbage-collection window (fixed at 4500s on CockroachDB Basic). After GC the row versions age out of the live cluster, but backups taken in the window keep them; deletion is not erasure.',
+          'This is the wrapped-key row the erasure DELETEs. Read back AS OF SYSTEM TIME within the garbage-collection window (fixed at 4500s on CockroachDB Basic), the deleted row is still fully readable; backups keep it past GC too. Deleting the row is not erasure, which is why the real erasure destroys the KEY in KMS.',
       }
     },
     async searchMemory(subject: string): Promise<SearchView> {

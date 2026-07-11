@@ -342,7 +342,6 @@ func (s *Service) Memory(ctx context.Context, subjectID string) (MemoryView, err
 // field is from the live database; nothing is simulated.
 type TimeTravelView struct {
 	SubjectID string `json:"subject_id"`
-	MemoryID  string `json:"memory_id"`
 	// AsOf is the cluster logical timestamp captured between the insert and the delete.
 	AsOf string `json:"as_of"`
 	// NormalReadRows is what a plain SELECT sees after the DELETE (0: the row is "gone").
@@ -358,21 +357,37 @@ type TimeTravelView struct {
 // AS OF SYSTEM TIME clause (which cannot take a placeholder) can never carry anything else.
 var ttTimestampRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?$`)
 
+// searchOverfetch is how many extra rows the similarity search reads beyond k so that NULL-distance
+// (erased) rows, which CockroachDB sorts first, cannot push live results past the limit under the
+// scan plan. Comfortably above any realistic per-subject memory count.
+const searchOverfetch = 64
+
 // TimeTravel runs the whole beat server-side: insert a throwaway row (fresh random subject, tiny
 // ciphertext placeholders, no key), capture the cluster's logical timestamp, DELETE the row like
 // an ordinary "erasure", then count what a normal read and an AS OF SYSTEM TIME read each see.
 func (s *Service) TimeTravel(ctx context.Context) (TimeTravelView, error) {
 	v := TimeTravelView{
-		GCNote: "AS OF SYSTEM TIME reads MVCC history within the garbage-collection window " +
-			"(fixed at 4500s on CockroachDB Basic). After GC the row versions age out of the " +
-			"live cluster, but backups taken in the window keep them; deletion is not erasure.",
+		GCNote: "This is the wrapped-key row the erasure DELETEs. Read back AS OF SYSTEM TIME " +
+			"within the garbage-collection window (fixed at 4500s on CockroachDB Basic), the " +
+			"deleted row is still fully readable; backups keep it past GC too. Deleting the row " +
+			"is not erasure, which is why the real erasure destroys the KEY in KMS.",
 	}
+	// Dummy wrapped-key row values (bytes + arn text + origin); nothing sensitive, deleted at once.
 	err := s.operator.QueryRow(ctx, s.q.MustGet(qTTInsert),
-		[]byte{0x01}, []byte{0x02}, []byte{0x03}, []byte{0x04}, []byte{0x05},
-	).Scan(&v.SubjectID, &v.MemoryID)
+		[]byte{0x01}, "arn:aws:kms:demo:time-travel", "GENERATE_DATA_KEY", []byte{0x02},
+	).Scan(&v.SubjectID)
 	if err != nil {
 		return TimeTravelView{}, fmt.Errorf("time-travel insert: %w", err)
 	}
+	// Best-effort cleanup: if anything between the insert and the intended DELETE errors, the
+	// throwaway row would otherwise leak permanently into subject_keys. The normal path DELETEs it
+	// as step three; this deferred delete is idempotent (a no-op once that ran) and uses a fresh
+	// context so it still fires if ctx was cancelled.
+	defer func() {
+		cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = s.operator.Exec(cctx, s.q.MustGet(qTTDelete), v.SubjectID)
+	}()
 	// The timestamp must postdate the insert's commit and predate the delete; a fresh statement
 	// on the same pool satisfies both.
 	var asOf string
@@ -383,7 +398,7 @@ func (s *Service) TimeTravel(ctx context.Context) (TimeTravelView, error) {
 		return TimeTravelView{}, fmt.Errorf("unexpected cluster timestamp format %q", asOf)
 	}
 	v.AsOf = asOf
-	if _, err := s.operator.Exec(ctx, s.q.MustGet(qTTDelete), v.MemoryID); err != nil {
+	if _, err := s.operator.Exec(ctx, s.q.MustGet(qTTDelete), v.SubjectID); err != nil {
 		return TimeTravelView{}, fmt.Errorf("time-travel delete: %w", err)
 	}
 	if err := s.operator.QueryRow(ctx, s.q.MustGet(qTTCount), v.SubjectID).Scan(&v.NormalReadRows); err != nil {
@@ -391,7 +406,7 @@ func (s *Service) TimeTravel(ctx context.Context) (TimeTravelView, error) {
 	}
 	// AS OF SYSTEM TIME requires a constant expression, not a placeholder, so the statement is
 	// composed against the regexp-pinned timestamp above (digits and one dot only).
-	asOfSQL := "SELECT count(*) FROM agent_memory AS OF SYSTEM TIME " + asOf + " WHERE subject_id = $1"
+	asOfSQL := "SELECT count(*) FROM subject_keys AS OF SYSTEM TIME " + asOf + " WHERE subject_id = $1"
 	if err := s.operator.QueryRow(ctx, asOfSQL, v.SubjectID).Scan(&v.TimeTravelRows); err != nil {
 		return TimeTravelView{}, fmt.Errorf("time-travel past read: %w", err)
 	}
@@ -426,30 +441,70 @@ func (s *Service) Search(ctx context.Context, subjectID, embeddingB64 string, k 
 	if k < 1 || k > 10 {
 		k = 3
 	}
-	v := SearchView{Results: []SearchHit{}}
-	rows, err := s.operator.Query(ctx, s.q.MustGet(qSearchPrefix), subjectID, vec, k)
+	// The primary query keeps LIMIT k so it stays C-SPANN-eligible (a larger LIMIT or a WHERE
+	// embedding IS NOT NULL filter both make the planner drop the vector index, per issue #146145).
+	// The C-SPANN index plan never emits NULL-distance rows, so under it LIMIT k is exactly correct.
+	v, rawCount, err := s.searchOnce(ctx, subjectID, vec, k)
 	if err != nil {
-		return SearchView{}, fmt.Errorf("vector search: %w", err)
+		return SearchView{}, err
+	}
+	// Only the scan fallback (tiny tables) can leak erased rows: CockroachDB sorts NULL distances
+	// FIRST (a documented divergence from Postgres NULLS LAST), so a scan can return k rows of which
+	// some are the erased subject's NULLs, displacing live results past the limit. Detect exactly
+	// that (the raw row count hit k but live results came up short) and re-fetch wide once, trimming
+	// to k after dropping NULLs. The common path (index plan, or a subject with <= k memories) never
+	// takes this branch, so the on-screen mem_idx plan and the demo's one-memory-per-subject case
+	// are untouched.
+	if rawCount == k && len(v.Results) < k {
+		wide, _, werr := s.searchOnce(ctx, subjectID, vec, k+searchOverfetch)
+		if werr != nil {
+			return SearchView{}, werr
+		}
+		if len(wide.Results) > k {
+			wide.Results = wide.Results[:k]
+		}
+		wide.IndexUsed, wide.ExplainLine = v.IndexUsed, v.ExplainLine // keep the LIMIT-k plan line
+		v = wide
+	}
+	return v, nil
+}
+
+// searchOnce runs the similarity search at a given SQL LIMIT and returns the live (non-NULL) hits
+// (bounded by that limit), plus the raw row count the query returned (including NULL-distance
+// erased rows, which it filters out). The EXPLAIN of the same limit fills IndexUsed / ExplainLine
+// from the database's own plan. The caller trims the hits to the requested k.
+func (s *Service) searchOnce(ctx context.Context, subjectID, vec string, limit int) (SearchView, int, error) {
+	v := SearchView{Results: []SearchHit{}}
+	raw := 0
+	rows, err := s.operator.Query(ctx, s.q.MustGet(qSearchPrefix), subjectID, vec, limit)
+	if err != nil {
+		return SearchView{}, 0, fmt.Errorf("vector search: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
+		raw++
 		var h SearchHit
-		if err := rows.Scan(&h.MemoryID, &h.Distance); err != nil {
-			return SearchView{}, fmt.Errorf("vector search scan: %w", err)
+		var dist *float64
+		if err := rows.Scan(&h.MemoryID, &dist); err != nil {
+			return SearchView{}, 0, fmt.Errorf("vector search scan: %w", err)
 		}
+		if dist == nil {
+			continue // erased row (vector destroyed): not a retrievable memory
+		}
+		h.Distance = *dist
 		v.Results = append(v.Results, h)
 	}
 	if err := rows.Err(); err != nil {
-		return SearchView{}, fmt.Errorf("vector search rows: %w", err)
+		return SearchView{}, 0, fmt.Errorf("vector search rows: %w", err)
 	}
 
 	// Ask the database how it planned the query and report ITS answer. EXPLAIN does not execute,
 	// so this is cheap; a plan that stopped using mem_idx (index disabled, stats change) shows up
 	// as index_used=false on the console instead of a silently false claim.
-	ex, err := s.operator.Query(ctx, "EXPLAIN "+s.q.MustGet(qSearchPrefix), subjectID, vec, k)
+	ex, err := s.operator.Query(ctx, "EXPLAIN "+s.q.MustGet(qSearchPrefix), subjectID, vec, limit)
 	if err != nil {
 		// The search itself succeeded; a failed EXPLAIN degrades to "not proven", never an error.
-		return v, nil
+		return v, raw, nil
 	}
 	defer ex.Close()
 	for ex.Next() {
@@ -463,7 +518,7 @@ func (s *Service) Search(ctx context.Context, subjectID, embeddingB64 string, k 
 			break
 		}
 	}
-	return v, nil
+	return v, raw, nil
 }
 
 // ProofView is a subject's recorded erasure-proof state, including the signed proof document the

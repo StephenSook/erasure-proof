@@ -10,6 +10,9 @@ const PORT = 4173
 
 export default defineConfig({
   testDir: './e2e',
+  // The real-stack spec has its own config (playwright.realstack.config.ts) with a live backend;
+  // it must not run under the mock webServer.
+  testIgnore: '**/realstack.spec.ts',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
