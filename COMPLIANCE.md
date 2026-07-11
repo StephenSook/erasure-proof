@@ -59,8 +59,9 @@ How this project relates, stated precisely:
   window. Expressing the erasure proof as a PCT extension claim is future work, not a shipped
   feature.
 
-Validator context: the erasure-gap quote in the README is from Peter Borner in his role as interim
-chair of OPSF, attributed with his permission.
+Validator context: the erasure-gap quotes are from two independent experts, each attributed with
+their permission: Peter Borner in his role as interim chair of OPSF, and Debbie Reynolds ("The Data
+Diva"), a global data privacy and emerging-technologies expert.
 
 ## Honest limitations
 

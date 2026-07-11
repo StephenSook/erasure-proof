@@ -179,6 +179,13 @@ project:
 > of collection. I also don't know of anyone that can then prove they erased the data fully and
 > correctly."
 
+A second independent expert reached the same conclusion. Debbie Reynolds, "The Data Diva," a
+global data privacy and emerging-technologies expert, told us:
+
+> "Most organizations still struggle to fully demonstrate end-to-end data erasure. Many rely on
+> soft deletion, suppression, or retention schedules rather than immediate, irreversible deletion
+> across all systems."
+
 This project answers both halves inside one database: the lawful basis is bound to every memory at
 write time in the hash-chained decision log, and every erasure emits a signed, externally anchored
 proof. (On the relationship to the emerging PCT standard, see
@@ -186,9 +193,11 @@ proof. (On the relationship to the emerging PCT standard, see
 
 ## Production Readiness
 
-Seven CI jobs (Go race tests against a real CockroachDB, Python property tests under moto, web
-typecheck/lint/tests, full-history secret scanning, and a db-smoke job that proves the
-append-only and locking-privilege invariants as the REAL roles, not root) run on every push. The
+Nine CI jobs (Go race tests against a real CockroachDB, Python property tests under moto, web
+typecheck/lint/tests, full-history secret scanning, a db-smoke job that proves the append-only and
+locking-privilege invariants as the REAL roles not root, a mock-mode browser E2E, and a real-stack
+browser E2E that drives the whole loop with zero mocks over real HTTP, SQL, and crypto against
+moto-backed KMS and S3 Object Lock) run on every push. The
 deploy is code (`deploy/aws/`: one CloudFront URL, always-on Fargate, circuit-breaker rollback,
 three separated IAM principals with confused-deputy conditions) and was rehearsed end to end:
 deployed, smoked live including a full erase-and-prove loop on the cloud cluster, and torn down

@@ -74,6 +74,15 @@ export function Trust() {
         erasure proof answers the second. We align with PCT&apos;s audit-first philosophy but do not
         claim PCT conformance (different signature model; the spec is a v0.1 draft).
       </p>
+      <p className="muted">
+        A second independent expert, Debbie Reynolds, &quot;The Data Diva,&quot; a global data
+        privacy and emerging-technologies expert, named the exact failure mode this project defends
+        against: &quot;The bigger concern is not simply whether every copy is physically erased, but
+        whether data that should have reached the end of its lifecycle is later exposed in a breach
+        or inadvertently becomes active again.&quot; Quoted with permission. Crypto-shredding the
+        key (not soft-deleting the row) is what makes a re-exposed ciphertext unreadable, and the
+        resurrection guard refuses to re-add an erased subject.
+      </p>
 
       <h2>Conditions we state out loud</h2>
       <ul className="muted">
