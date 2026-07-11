@@ -151,12 +151,36 @@ export default function App() {
         )}
 
         {result && result.kind === 'verified' && (
-          <View style={[styles.verdictCard, { borderColor: C.green }]}>
-            <Text style={[styles.verdict, { color: C.green }]}>SIGNATURE VERIFIED</Text>
+          <View
+            style={[styles.verdictCard, { borderColor: result.signerTrusted ? C.green : C.warn }]}
+          >
+            <Text
+              style={[styles.verdict, { color: result.signerTrusted ? C.green : C.warn }]}
+            >
+              SIGNATURE VALID
+            </Text>
             <Text style={styles.verdictNote}>
               ECDSA P-256 over the exact signed bytes, checked on this device. These facts are read
               from the signed bytes, so what is verified is what you see.
             </Text>
+            {result.signerTrusted ? (
+              <View style={[styles.signerBanner, { borderColor: C.green }]}>
+                <Text style={[styles.signerLead, { color: C.green }]}>RECOGNIZED SIGNER</Text>
+                <Text style={styles.signerNote}>
+                  Signed by {result.signerLabel}, a key this app is built to trust. Fingerprint{' '}
+                  {result.signerFingerprint}.
+                </Text>
+              </View>
+            ) : (
+              <View style={[styles.signerBanner, { borderColor: C.warn }]}>
+                <Text style={[styles.signerLead, { color: C.warn }]}>SIGNER NOT RECOGNIZED</Text>
+                <Text style={styles.signerNote}>
+                  The signature is valid over these bytes, but this signer key is not one this app
+                  knows. Anyone can sign their own certificate. Before you trust the claim, compare
+                  the fingerprint below against erasure-proof's published signing key, out of band.
+                </Text>
+              </View>
+            )}
             <View style={styles.facts}>
               {FACT_ROWS.map(
                 (row) =>
@@ -175,6 +199,12 @@ export default function App() {
             {typeof result.facts.nist_condition === 'string' && (
               <Text style={styles.nist}>{result.facts.nist_condition}</Text>
             )}
+            <Text style={styles.trustAnchor}>
+              This device proves the certificate is internally consistent and untampered under the
+              signer key it carries. Authenticity also needs that key to be the real one: a matching,
+              out-of-band fingerprint is what anchors that trust. A valid signature alone is not
+              proof the signer is legitimate.
+            </Text>
           </View>
         )}
 
@@ -249,6 +279,24 @@ const styles = StyleSheet.create({
   },
   verdict: { fontSize: 22, fontWeight: '800', letterSpacing: 1 },
   verdictNote: { color: C.fg2, fontSize: 13, lineHeight: 20, marginTop: 8 },
+  signerBanner: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    backgroundColor: C.panel2,
+  },
+  signerLead: { fontSize: 12, fontWeight: '700', letterSpacing: 1 },
+  signerNote: { color: C.fg2, fontSize: 12, lineHeight: 18, marginTop: 6 },
+  trustAnchor: {
+    color: C.fg3,
+    fontSize: 11,
+    lineHeight: 17,
+    marginTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: C.line,
+    paddingTop: 12,
+  },
   facts: { marginTop: 16, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 12, gap: 8 },
   factRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
   factKey: { color: C.fg3, fontSize: 12, flexShrink: 0 },
