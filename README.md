@@ -157,8 +157,11 @@ wrapper (atomicity proven under injected retry errors); AES-256-GCM binds `subje
 head` as associated data; every erasure emits an ECDSA P-256 proof that signs the decision-log
 seq, the erasure's own timestamp, and the RFC 6962 Merkle root and tree size, anchored to S3
 Object Lock; the proof verifies in the judge's browser over the exact stored canonical bytes,
-with client-side subject binding against replay; a genuinely read-only MCP server exposes four
-forensic tools; and a hypothesis property-test suite proves decrypt-fails-after-destruction. Under
+with client-side subject binding against replay; the same proof verifies **offline on a phone** via
+the companion mobile app ([mobile/](mobile/), Expo/React Native, pure-JS P-256, byte-for-byte
+parity with the backend signer) so an auditor can check an erasure certificate with no server and
+no network; a genuinely read-only MCP server exposes four forensic tools; and a hypothesis
+property-test suite proves decrypt-fails-after-destruction. Under
 concurrent erasure the gapless hash chain holds with no lost or duplicated appends, measured to
 50-way concurrency with the retry-budget ceiling reported honestly
 ([docs/concurrency.md](docs/concurrency.md)). (Details: [ARCHITECTURE.md](ARCHITECTURE.md),

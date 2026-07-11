@@ -326,3 +326,25 @@ jobs:
           name: playwright-realstack-report
           path: web/playwright-report/
           retention-days: 7
+
+  mobile:
+    # The offline Erasure Proof Verifier (Expo/React Native). Typecheck + the crypto-parity test
+    # that proves the on-device @noble/curves verifier agrees with the backend signer byte-for-byte
+    # (and rejects tampered / wrong-key / malformed certificates).
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Typecheck (tsc)
+        run: npm run typecheck
+      - name: Verify parity + tamper tests
+        run: npm test
