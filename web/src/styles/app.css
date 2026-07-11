@@ -537,6 +537,13 @@ button {
   gap: 16px;
   max-width: 760px;
 }
+.hero__eyebrow {
+  color: var(--hue);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+}
 .hero__title {
   font-family: var(--font-display);
   color: var(--fg-0);

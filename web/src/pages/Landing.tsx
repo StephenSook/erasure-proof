@@ -73,13 +73,16 @@ export function Landing() {
       <div className="hero">
         <HeroParticles />
         <div className="hero__copy">
+          <div className="hero__eyebrow">The system of record for agentic memory</div>
           <h1 className="hero__title">
             Prove a person&apos;s data is <em>truly gone</em> from an agent&apos;s memory.
           </h1>
           <p className="hero__lead">
-            Most teams can only prove they deleted a row. The embedding is still reconstructible. We
+            CockroachDB keeps agent memory durable and consistent through failure. But a system of
+            record is only complete if it can prove memory is gone when the law demands it. Most
+            teams can only prove they deleted a row, and the embedding is still reconstructible. We
             crypto-shred it, retain the mandated decision log atomically, and hand you a signed proof
-            that survives node failure.
+            that survives a node kill.
           </p>
           <Link className="cta" to="/demo">
             Open the demo console -&gt;
