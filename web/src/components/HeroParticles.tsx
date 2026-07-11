@@ -107,20 +107,35 @@ export function HeroParticles() {
       })
     }
 
-    // Scatter back to noise once the hero is meaningfully scrolled past; reconverge when back.
-    // Only restart the tween when the threshold actually flips: restarting per scroll event would
-    // freeze the ease-in curve near its start and churn an animation object per event.
-    let lastScattered = false
+    // Scroll-SCRUBBED: the name dissolves to noise in real time as you scroll down, and reforms as
+    // you scroll back up, progress tied directly to scroll position. This is the thesis in motion,
+    // a name reconstructible from a vector, then provable noise, driven by the reader's own scroll.
+    // The entrance tween runs once on load; the first user scroll hands off to the scrub.
+    let scrubbing = false
+    let rafPending = false
+    const applyScroll = () => {
+      rafPending = false
+      if (cancelled) {
+        return
+      }
+      // p: 1 = the word (at the top), 0 = noise (scrolled ~85% of the hero height past).
+      const p = Math.max(0, Math.min(1, 1 - window.scrollY / (height * 0.85)))
+      state.p = p
+      draw()
+    }
     const onScroll = () => {
       if (cancelled) {
         return
       }
-      const scattered = window.scrollY > height * 0.35
-      if (scattered === lastScattered) {
-        return
+      if (!scrubbing) {
+        // Hand off from the entrance tween to scrub on the first real scroll.
+        scrubbing = true
+        currentAnim?.pause()
       }
-      lastScattered = scattered
-      toward(scattered ? 0 : 1, 900)
+      if (!rafPending) {
+        rafPending = true
+        requestAnimationFrame(applyScroll)
+      }
     }
 
     const start = () => {
@@ -140,7 +155,14 @@ export function HeroParticles() {
         alpha: 0.5 + Math.random() * 0.5,
       }))
       draw()
-      toward(1, 1800)
+      // If the page loaded already scrolled (refresh mid-page), start scrubbed at the right value;
+      // otherwise play the converge entrance.
+      if (window.scrollY > 4) {
+        scrubbing = true
+        applyScroll()
+      } else {
+        toward(1, 1800)
+      }
       window.addEventListener('scroll', onScroll, { passive: true })
     }
 

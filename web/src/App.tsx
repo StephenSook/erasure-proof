@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react'
 import { NavLink, Route, Routes } from 'react-router-dom'
+import { ScrollProgress } from './components/ScrollProgress'
 import { Landing } from './pages/Landing'
 
 // The landing page stays eager (it is the entry; a spinner there would be worse than the bytes).
@@ -22,6 +23,7 @@ const navClass = ({ isActive }: { isActive: boolean }) => (isActive ? 'active' :
 export function App() {
   return (
     <div className="app">
+      <ScrollProgress />
       <header className="header">
         <div className="header__brand">
           <NavLink to="/" className="header__mark">

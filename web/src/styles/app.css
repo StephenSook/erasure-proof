@@ -48,6 +48,26 @@ button {
 .page-loading {
   min-height: 60dvh;
 }
+/* Scroll-progress bar: a thin fixed track at the very top; the inner bar's scaleX tracks scroll.
+   transform-origin left so it grows from the left edge. Decorative, aria-hidden. */
+.scroll-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 20;
+  pointer-events: none;
+  background: transparent;
+}
+.scroll-progress__bar {
+  height: 100%;
+  width: 100%;
+  transform: scaleX(0);
+  transform-origin: left center;
+  background: linear-gradient(90deg, var(--hue-turquoise), var(--hue-cyan));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--hue-turquoise) 55%, transparent);
+}
 /* Node-kill cluster map (durability stage): rendered from the recorded transcript. */
 .clustermap {
   width: 100%;
