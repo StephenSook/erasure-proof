@@ -146,6 +146,20 @@ export interface AgentConfig {
   titan_available?: boolean
 }
 
+// SearchHit is one similarity result from the C-SPANN prefix search.
+export interface SearchHit {
+  memory_id: string
+  distance: number
+}
+
+// SearchView is the retrieval beat's result. index_used and explain_line come from a live EXPLAIN
+// on the server (the database's own plan), never asserted by the UI.
+export interface SearchView {
+  results: SearchHit[]
+  index_used: boolean
+  explain_line: string
+}
+
 // TitanEmbedding is one live AWS-native (Titan v2) embedding, in the same wire shape as the GTR
 // path (little-endian float32 base64 + its SHA-256) so the two vectors are directly comparable.
 export interface TitanEmbedding {
@@ -200,6 +214,7 @@ export interface DemoApi {
   forensicsAudit(subjectId: string): Promise<ForensicsAudit>
   writeMemory(turn: string): Promise<MemoryWriterResult>
   titanEmbed(text: string): Promise<TitanEmbedding>
+  searchMemory(subjectId: string, embeddingB64: string, k?: number): Promise<SearchView>
   erase(subjectId: string, lawfulBasis?: string): Promise<EraseResponse>
   getProof(subjectId: string): Promise<ProofView>
   getDecisionLog(): Promise<DecisionRow[]>
