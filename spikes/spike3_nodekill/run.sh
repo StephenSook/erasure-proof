@@ -69,3 +69,10 @@ echo ""
 echo "=== SPIKE 3 VERDICT: $PASSES/3 runs survived the node kill ==="
 echo "Record the result, the variant used, and whether catch-up worked in findings.md"
 echo "(Leave the cluster up for the recording, or 'docker compose -f deploy/local/docker-compose.yml down -v' to clean up.)"
+
+# Exit non-zero on any failed run so this is a real gate (CI and humans alike): a printed "FAILED"
+# with a zero exit would be a false green.
+if [ "$PASSES" -ne 3 ]; then
+  echo "FAIL: only $PASSES/3 runs survived the node kill; the resilience beat regressed."
+  exit 1
+fi

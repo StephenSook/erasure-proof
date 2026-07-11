@@ -16,8 +16,9 @@ defend, and every limitation is stated proactively.
   credential. We never claim the table is immutable to everyone.
 - CockroachDB is serializable and single-key linearizable, NOT strictly serializable (Jepsen). We
   say "serializable".
-- C-SPANN is in public preview and Euclidean-only at preview. We design around Euclidean distance
-  and disclose the preview status.
+- C-SPANN vector indexing was a public preview (L2/Euclidean-only) in v25.2; the current stable docs
+  (v26.2) no longer mark it preview and document L2, cosine, and inner-product distance. We use L2
+  (Euclidean) `<->` search; our cluster runs v25.4 LTS.
 - Row-Level Security is incompatible with change-data-capture queries on the same table, and
   changefeeds do not filter by RLS. We run changefeeds on non-RLS audit tables.
 - Tamper-evidence is app-side hash chaining plus S3 Object Lock. CockroachDB has no native

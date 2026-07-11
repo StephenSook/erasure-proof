@@ -1,0 +1,25 @@
+name: node-kill durability
+
+# The node-kill / Raft durability beat (judged claim: committed erasure survives a node failure)
+# needs a local 3-node CockroachDB cluster, which is too heavy for per-push CI. It runs nightly and
+# on demand instead, and is intentionally NOT a required check on pull requests. spikes/.../run.sh
+# exits non-zero unless all 3 runs survive the kill, so a regression fails this job.
+on:
+  workflow_dispatch:
+  schedule:
+    # Nightly at 06:17 UTC. Offset minute: */N and :00 crons are deprioritized by GitHub.
+    - cron: '17 6 * * *'
+
+jobs:
+  node-kill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install psycopg
+        run: pip install "psycopg[binary]"
+      - name: Node-kill durability (spike 3; 3/3 runs must survive)
+        run: bash spikes/spike3_nodekill/run.sh

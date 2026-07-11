@@ -87,7 +87,7 @@ export function Trust() {
       <h2>Conditions we state out loud</h2>
       <ul className="muted">
         <li>Serializable, not strictly serializable (Jepsen confirmed CockroachDB lacks the latter).</li>
-        <li>C-SPANN vector indexing is in preview and Euclidean-only at preview.</li>
+        <li>C-SPANN vector indexing was a preview (L2-only) in v25.2; the current stable docs (v26.2) no longer mark it preview and document L2, cosine, and inner-product distance. We use L2 search.</li>
         <li>Append-only holds against the agent and operator roles, not the owner/admin credential.</li>
         <li>Crypto-erasure is irreversible only with no persisted plaintext key and no escrowed or backed-up key copies.</li>
         <li>The closest prior art for the encrypted-vector primitive is CyborgDB; the contribution here is the combination (crypto-erased embedding + atomically retained decision log + externally anchored signed proof).</li>
