@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge } from '../components/Badge'
 import { CodeBlock } from '../components/CodeBlock'
-import { KeyValue } from '../components/KeyValue'
+import { KeyValue, type KV } from '../components/KeyValue'
 import { LcdCounter } from '../components/LcdCounter'
 import { Stage } from '../components/Stage'
 import { StatusDot } from '../components/StatusDot'
@@ -11,6 +11,7 @@ import { STAGES, type StageId, type StageMeta } from '../demoStages'
 import { pulseStageBar, revealResults, revealStages, scrambleIn } from '../fx'
 import { motionEnabled } from '../motion'
 import { useDemo } from '../useDemo'
+import type { SearchView } from '../api'
 
 type StyleWithVars = CSSProperties & Record<`--${string}`, string>
 
@@ -295,6 +296,22 @@ export function DemoConsole() {
     )
   }
 
+  function retrievalItems(view: SearchView, label: string): KV[] {
+    if (view.results.length === 0) {
+      return [{ k: label, v: '0 rows: the vector no longer exists', tone: 'ok', scramble: true }]
+    }
+    const hit = view.results[0]
+    const items: KV[] = [
+      { k: label, v: `found ${short(hit.memory_id, 16)} at distance ${hit.distance.toFixed(4)}` },
+    ]
+    // The plan line is the database's own EXPLAIN output; shown only when the C-SPANN index was
+    // actually in the plan (the mock never captures one, honestly).
+    if (view.index_used) {
+      items.push({ k: 'query plan', v: view.explain_line, tone: 'ok' })
+    }
+    return items
+  }
+
   function stageResult(id: StageId) {
     switch (id) {
       case 'memory':
@@ -314,6 +331,16 @@ export function DemoConsole() {
                   { k: 'subject key fingerprint', v: short(state.memory.key_fingerprint) },
                 ]}
               />
+            )}
+            {state.searchBefore && (
+              <>
+                <KeyValue items={retrievalItems(state.searchBefore, 'similarity search (C-SPANN)')} />
+                <div className="note">
+                  The agent retrieves this memory by vector similarity: the stored embedding is the
+                  query, so it finds itself at distance 0. Remember this search; it runs again after
+                  the erasure.
+                </div>
+              </>
             )}
             {memoryWriterPanel()}
           </>
@@ -385,6 +412,23 @@ export function DemoConsole() {
                   { k: 'subject key', v: state.memoryAfter.key_fingerprint ? 'STILL PRESENT' : 'destroyed (row gone)', tone: state.memoryAfter.key_fingerprint ? 'bad' : 'ok', scramble: true },
                 ]}
               />
+            )}
+            {state.searchAfter && (
+              <>
+                <KeyValue
+                  items={[
+                    ...(state.searchBefore
+                      ? retrievalItems(state.searchBefore, 'search before erasure').slice(0, 1)
+                      : []),
+                    ...retrievalItems(state.searchAfter, 'the same search now'),
+                  ]}
+                />
+                <div className="note">
+                  The identical C-SPANN similarity search that found the memory in stage 1: the
+                  erasure destroyed the vector, so the agent can no longer even locate what it can
+                  no longer decrypt.
+                </div>
+              </>
             )}
             {state.proof && (
               <div className="note">

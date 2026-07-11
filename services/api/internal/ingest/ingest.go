@@ -281,6 +281,13 @@ func validatePrepared(p prepared) error {
 	return nil
 }
 
+// VectorLiteral decodes base64 little-endian float32 bytes into a pgvector literal "[f1,f2,...]".
+// Exported for the demo gateway's similarity-search beat, which takes query vectors in the same
+// wire format the ingest path stores.
+func VectorLiteral(embeddingB64 string) (string, error) {
+	return vectorLiteral(embeddingB64)
+}
+
 // vectorLiteral decodes base64 little-endian float32 bytes into a pgvector literal "[f1,f2,...]".
 func vectorLiteral(embeddingB64 string) (string, error) {
 	raw, err := base64.StdEncoding.DecodeString(embeddingB64)

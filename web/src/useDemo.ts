@@ -12,6 +12,7 @@ import {
   type MemoryWriterResult,
   type ProofView,
   type RbacResult,
+  type SearchView,
   type TitanEmbedding,
 } from './api'
 import { demoMemory } from './data/demoMemory'
@@ -40,6 +41,9 @@ export interface DemoState {
   memWriterStatus: 'idle' | 'running' | 'done' | 'error'
   memWriterError?: string
   memWriterAvailable?: boolean
+  // C-SPANN similarity search of the current subject: found before erasure, empty after.
+  searchBefore?: SearchView
+  searchAfter?: SearchView
   // Live AWS-native (Titan v2) side-by-side embedding of the memory sentence on screen.
   titan?: TitanEmbedding
   titanStatus: 'idle' | 'running' | 'done' | 'error'
@@ -131,6 +135,11 @@ export function useDemo(injected?: DemoApi) {
         subjectRef.current = ing.subject_id
         embeddingRef.current = demoMemory.embeddingB64
         const mem = await c.getMemory(ing.subject_id)
+        // The retrieval beat: the C-SPANN search finds the just-stored memory (its own vector is
+        // the query, so distance ~0). A search failure must not fail the store stage.
+        const searchBefore = await c
+          .searchMemory(ing.subject_id, demoMemory.embeddingB64)
+          .catch(() => undefined)
         return {
           subjectId: ing.subject_id,
           currentEmbeddingB64: demoMemory.embeddingB64,
@@ -141,6 +150,8 @@ export function useDemo(injected?: DemoApi) {
           memoryAfter: undefined,
           erase: undefined,
           proof: undefined,
+          searchBefore,
+          searchAfter: undefined,
         }
       }),
     [step],
@@ -206,6 +217,11 @@ export function useDemo(injected?: DemoApi) {
         subjectRef.current = written.subject_id
         embeddingRef.current = written.embedding_b64
         const mem = await clientRef.current!.getMemory(written.subject_id)
+        // The agent-written memory becomes the loop subject, so the retrieval beat searches for
+        // IT (its own vector as the query). A search failure must not fail the writer.
+        const searchBefore = await clientRef
+          .current!.searchMemory(written.subject_id, written.embedding_b64)
+          .catch(() => undefined)
         setState((s) => ({
           ...s,
           memWriter: written,
@@ -213,6 +229,8 @@ export function useDemo(injected?: DemoApi) {
           subjectId: written.subject_id,
           currentEmbeddingB64: written.embedding_b64,
           currentEmbeddingSha256: written.embedding_sha256,
+          searchBefore,
+          searchAfter: undefined,
           memory: mem,
           memoryAfter: undefined,
           erase: undefined,
@@ -287,7 +305,12 @@ export function useDemo(injected?: DemoApi) {
         const er = await c.erase(id)
         const after = await c.getMemory(id)
         const proof = await c.getProof(id)
-        return { erase: er, memoryAfter: after, proof }
+        // The same similarity search that found the memory before erasure: the vector is
+        // destroyed, so it finds nothing. A search failure must not fail the erase stage.
+        const searchAfter = await c
+          .searchMemory(id, embeddingRef.current)
+          .catch(() => undefined)
+        return { erase: er, memoryAfter: after, proof, searchAfter }
       }),
     [step, requireSubject],
   )

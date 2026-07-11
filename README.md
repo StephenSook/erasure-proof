@@ -84,7 +84,12 @@ SECURITY, COMPLIANCE) stay at the root where GitHub surfaces them.
 
 - **Distributed Vector Indexing (C-SPANN, preview)**: the live GTR embedding is indexed with a
   `subject_id` prefix, so per-subject similarity search is index-accelerated and the erasure
-  purge (setting the vector NULL) is a plain UPDATE the index survives. Runs on the free Basic
+  purge (setting the vector NULL) is a plain UPDATE the index survives. The console demonstrates
+  retrieval live: the similarity search finds the stored memory (the plan line from a real
+  EXPLAIN, naming `mem_idx`, is shown on screen), and the same search after erasure finds
+  nothing, because the vector itself is destroyed. Preview finding, verified empirically: any
+  non-prefix filter (even `embedding IS NOT NULL`) disqualifies C-SPANN acceleration, so the
+  search filters on the prefix column only (`db/queries/memory.sql`). Runs on the free Basic
   tier. Euclidean at preview. (`db/migrations/0003_vector_index.sql`, spike 2 findings.)
 - **Managed MCP Server**: the independent verification path. A least-privilege service account
   reads the decision-log chain head through `cockroachlabs.cloud/mcp` (`select_query`), so a

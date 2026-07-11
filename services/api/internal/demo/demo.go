@@ -17,6 +17,7 @@ import (
 
 	"github.com/StephenSook/erasure-proof/services/api/internal/agent"
 	"github.com/StephenSook/erasure-proof/services/api/internal/chain"
+	"github.com/StephenSook/erasure-proof/services/api/internal/ingest"
 	"github.com/StephenSook/erasure-proof/services/api/internal/merkle"
 	"github.com/StephenSook/erasure-proof/services/api/internal/store"
 	"github.com/jackc/pgx/v5"
@@ -32,12 +33,13 @@ const (
 	qDecisionLogVerify     = "decision_log_verify"
 	qDecisionLogLeaves     = "decision_log_leaves"
 	qDecisionLogIndexed    = "decision_log_indexed"
+	qSearchPrefix          = "search_prefix"
 )
 
 // RequiredQueries are the named statements the demo gateway looks up; require them at startup.
 var RequiredQueries = []string{
 	qMemoryPreview, qSubjectKeyFingerprint, qErasureRecordGet, qDecisionLogAll, qDecisionLogVerify,
-	qDecisionLogLeaves, qDecisionLogIndexed,
+	qDecisionLogLeaves, qDecisionLogIndexed, qSearchPrefix,
 }
 
 // ErrNotFound means the requested subject has no memory or erasure record.
@@ -327,6 +329,74 @@ func (s *Service) Memory(ctx context.Context, subjectID string) (MemoryView, err
 		v.KeyFingerprint = fp
 	} else if !errors.Is(e, pgx.ErrNoRows) {
 		return MemoryView{}, fmt.Errorf("key fingerprint: %w", e)
+	}
+	return v, nil
+}
+
+// SearchHit is one similarity result from the C-SPANN prefix search.
+type SearchHit struct {
+	MemoryID string  `json:"memory_id"`
+	Distance float64 `json:"distance"`
+}
+
+// SearchView is the retrieval beat's result: the hits, plus whether the query plan actually used
+// the C-SPANN vector index (read from a live EXPLAIN, not asserted).
+type SearchView struct {
+	Results   []SearchHit `json:"results"`
+	IndexUsed bool        `json:"index_used"`
+	// ExplainLine is the plan line naming the index (empty when the plan did not use it), so the
+	// console shows the database's own words rather than our claim.
+	ExplainLine string `json:"explain_line"`
+}
+
+// Search runs the prefix-filtered C-SPANN similarity search for a subject. The erasure sets the
+// live vector to NULL, so the same search that finds a memory before erasure finds nothing after:
+// the agent can no longer even locate what it can no longer decrypt. The query vector arrives as
+// base64 little-endian float32 (the same wire format the ingest path stores).
+func (s *Service) Search(ctx context.Context, subjectID, embeddingB64 string, k int) (SearchView, error) {
+	vec, err := ingest.VectorLiteral(embeddingB64)
+	if err != nil {
+		return SearchView{}, err
+	}
+	if k < 1 || k > 10 {
+		k = 3
+	}
+	v := SearchView{Results: []SearchHit{}}
+	rows, err := s.operator.Query(ctx, s.q.MustGet(qSearchPrefix), subjectID, vec, k)
+	if err != nil {
+		return SearchView{}, fmt.Errorf("vector search: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var h SearchHit
+		if err := rows.Scan(&h.MemoryID, &h.Distance); err != nil {
+			return SearchView{}, fmt.Errorf("vector search scan: %w", err)
+		}
+		v.Results = append(v.Results, h)
+	}
+	if err := rows.Err(); err != nil {
+		return SearchView{}, fmt.Errorf("vector search rows: %w", err)
+	}
+
+	// Ask the database how it planned the query and report ITS answer. EXPLAIN does not execute,
+	// so this is cheap; a plan that stopped using mem_idx (index disabled, stats change) shows up
+	// as index_used=false on the console instead of a silently false claim.
+	ex, err := s.operator.Query(ctx, "EXPLAIN "+s.q.MustGet(qSearchPrefix), subjectID, vec, k)
+	if err != nil {
+		// The search itself succeeded; a failed EXPLAIN degrades to "not proven", never an error.
+		return v, nil
+	}
+	defer ex.Close()
+	for ex.Next() {
+		var line string
+		if err := ex.Scan(&line); err != nil {
+			break
+		}
+		if strings.Contains(line, "mem_idx") {
+			v.IndexUsed = true
+			v.ExplainLine = strings.TrimSpace(line)
+			break
+		}
 	}
 	return v, nil
 }

@@ -34,10 +34,16 @@ WHERE subject_id = $1;
 
 -- name: search_prefix
 -- Prefix-filtered C-SPANN similarity search (Euclidean). subject_id is the index prefix, so this
--- is index-accelerated; the non-erased rows only (embedding IS NOT NULL after erasure sets it to
--- NULL). $2 is the query vector, $3 the k.
+-- is index-accelerated. $2 is the query vector, $3 the k.
+--
+-- Deliberately NO "embedding IS NOT NULL" filter: verified empirically on v25.2.20 that (a) any
+-- non-prefix filter disqualifies C-SPANN acceleration (the planner falls back to a plain
+-- subject-id index plus top-k, consistent with issue #146145: only prefix-column filters are
+-- supported), and (b) the filter is redundant anyway, because rows whose vector was destroyed by
+-- erasure (embedding = NULL) never surface from the vector search operator. Same result set, and
+-- EXPLAIN shows "vector search table: agent_memory@mem_idx".
 SELECT id, embedding <-> $2 AS distance
 FROM agent_memory
-WHERE subject_id = $1 AND embedding IS NOT NULL
+WHERE subject_id = $1
 ORDER BY embedding <-> $2
 LIMIT $3;

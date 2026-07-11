@@ -65,6 +65,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/agent/forensics", s.handleAgentForensics)
 	mux.HandleFunc("POST /api/agent/memory-writer", s.handleAgentMemoryWriter)
 	mux.HandleFunc("POST /api/embedding/titan", s.handleTitanEmbed)
+	mux.HandleFunc("POST /api/memory/search", s.handleMemorySearch)
 	return mux
 }
 
@@ -502,6 +503,32 @@ func (s *Server) handleAgentConfig(w http.ResponseWriter, r *http.Request) {
 		"memory_writer_available": memWriter,
 		"titan_available":         s.demo.TitanAvailable(),
 	})
+}
+
+func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SubjectID string `json:"subject_id"`
+		Embedding string `json:"embedding"` // base64 little-endian float32, the ingest wire format
+		K         int    `json:"k"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil ||
+		req.SubjectID == "" || req.Embedding == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "subject_id and embedding are required"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	view, err := s.demo.Search(ctx, req.SubjectID, req.Embedding, req.K)
+	if errors.Is(err, ingest.ErrBadEmbedding) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		log.Printf("httpapi: vector search failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "vector search failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
 }
 
 func (s *Server) handleTitanEmbed(w http.ResponseWriter, r *http.Request) {

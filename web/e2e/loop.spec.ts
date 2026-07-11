@@ -13,6 +13,11 @@ test('the full erasure loop runs in the browser and the proof verifies', async (
   // The leak beat reconstructs the name from the embedding alone.
   await expect(page.getByText(/Stephen Sookra/).first()).toBeVisible({ timeout: 30_000 })
 
+  // The retrieval beat: the similarity search finds the stored memory (stage 1), and the SAME
+  // search after erasure finds nothing because the vector itself was destroyed.
+  await expect(page.getByText(/found aaaaaaaa-/).first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(/0 rows: the vector no longer exists/)).toBeVisible({ timeout: 30_000 })
+
   // The audit beat: the agent role is denied the forbidden write (SQLSTATE 42501) and the
   // hash chain is intact.
   await expect(page.getByText('42501')).toBeVisible({ timeout: 30_000 })

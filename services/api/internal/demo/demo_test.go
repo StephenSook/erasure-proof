@@ -3,8 +3,10 @@ package demo_test
 import (
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -118,6 +120,17 @@ func setup(t *testing.T) (*store.Store, *pgxpool.Pool) {
 			t.Fatalf("apply %s: %v", m, err)
 		}
 	}
+	// The C-SPANN index (migration 0003), so the search test can assert index_used from a live
+	// EXPLAIN: the wired-or-cut proof that "Distributed Vector Indexing" is real, not claimed.
+	// SET CLUSTER SETTING cannot run inside a multi-statement batch, so apply the pieces
+	// separately rather than the raw migration file.
+	if _, err := admin.Exec(ctx, "SET CLUSTER SETTING feature.vector_index.enabled = true"); err != nil {
+		t.Fatalf("enable vector index feature: %v", err)
+	}
+	if _, err := admin.Exec(ctx,
+		"SET sql_safe_updates = false; CREATE VECTOR INDEX IF NOT EXISTS mem_idx ON agent_memory (subject_id, embedding); SET sql_safe_updates = true"); err != nil {
+		t.Fatalf("create vector index: %v", err)
+	}
 	if _, err := admin.Exec(ctx,
 		"TRUNCATE agent_memory, subject_keys, decision_log, erasure_record"); err != nil {
 		t.Fatalf("truncate: %v", err)
@@ -193,6 +206,61 @@ func TestMemory_UnknownSubjectNotFound(t *testing.T) {
 	_, err := svc.Memory(context.Background(), "00000000-0000-0000-0000-000000000000")
 	if err != demo.ErrNotFound {
 		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSearch_FindsBeforeErasureAndNothingAfter(t *testing.T) {
+	st, admin := setup(t)
+	id := seedSubject(t, admin)
+	svc := demo.New(st, stubInverter{})
+	ctx := context.Background()
+
+	// The query vector is the exact stored one (0.01 x 768) in the ingest wire format, so the
+	// nearest neighbour is the seeded memory itself at distance ~0.
+	raw := make([]byte, 768*4)
+	bits := math.Float32bits(0.01)
+	for i := 0; i < 768; i++ {
+		binary.LittleEndian.PutUint32(raw[i*4:], bits)
+	}
+	q := base64.StdEncoding.EncodeToString(raw)
+
+	before, err := svc.Search(ctx, id, q, 3)
+	if err != nil {
+		t.Fatalf("search before erasure: %v", err)
+	}
+	if len(before.Results) != 1 {
+		t.Fatalf("results before erasure = %d, want 1", len(before.Results))
+	}
+	if before.Results[0].Distance > 1e-6 {
+		t.Errorf("distance = %v, want ~0 (query is the stored vector)", before.Results[0].Distance)
+	}
+	// setup applies migration 0003, so the plan MUST use the C-SPANN index; this is the
+	// wired-or-cut proof for the "Distributed Vector Indexing" claim, read from a live EXPLAIN.
+	if !before.IndexUsed {
+		t.Errorf("index_used = false, want the C-SPANN plan (explain line %q)", before.ExplainLine)
+	}
+	if !strings.Contains(before.ExplainLine, "mem_idx") {
+		t.Errorf("explain line %q does not name mem_idx", before.ExplainLine)
+	}
+
+	// The erasure transaction sets the live vector to NULL; simulate that destruction directly.
+	if _, err := admin.Exec(ctx, `UPDATE agent_memory SET embedding = NULL WHERE subject_id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	after, err := svc.Search(ctx, id, q, 3)
+	if err != nil {
+		t.Fatalf("search after erasure: %v", err)
+	}
+	if len(after.Results) != 0 {
+		t.Fatalf("results after erasure = %d, want 0 (the vector no longer exists)", len(after.Results))
+	}
+}
+
+func TestSearch_RejectsBadEmbedding(t *testing.T) {
+	st, _ := setup(t)
+	svc := demo.New(st, stubInverter{})
+	if _, err := svc.Search(context.Background(), "00000000-0000-0000-0000-000000000000", "not-base64!!", 3); err == nil {
+		t.Fatal("want an error for a malformed query vector")
 	}
 }
 

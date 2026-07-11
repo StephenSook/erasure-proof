@@ -19,6 +19,7 @@ import {
   type MemoryWriterResult,
   type ProofView,
   type RbacResult,
+  type SearchView,
   type TitanEmbedding,
   type TreeHead,
 } from './types'
@@ -84,6 +85,13 @@ export function createHttpClient(base = ''): DemoApi {
     },
     titanEmbed(text) {
       return request<TitanEmbedding>(b, 'POST', '/api/embedding/titan', { text })
+    },
+    searchMemory(subjectId, embeddingB64, k = 3) {
+      return request<SearchView>(b, 'POST', '/api/memory/search', {
+        subject_id: subjectId,
+        embedding: embeddingB64,
+        k,
+      })
     },
     erase(subjectId, lawfulBasis = 'gdpr_art_17') {
       return request<EraseResponse>(b, 'POST', '/erase', {

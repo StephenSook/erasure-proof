@@ -21,6 +21,7 @@ import {
   type MemoryWriterResult,
   type ProofView,
   type RbacResult,
+  type SearchView,
   type StreamHandlers,
   type TitanEmbedding,
   type TreeHead,
@@ -168,6 +169,24 @@ export function createMockClient(): DemoApi {
         forensics_available: false,
         memory_writer_available: false,
         titan_available: false,
+      }
+    },
+    async searchMemory(subject: string): Promise<SearchView> {
+      // Mirrors the real semantics against the mock's own state: the stored memory is its own
+      // nearest neighbour at distance 0 until erasure destroys the vector, after which the search
+      // finds nothing. index_used stays false: only the real database's EXPLAIN can prove a plan,
+      // and the mock will not fabricate one.
+      if (erased || subject === '' || subject !== subjectId) {
+        return { results: [], index_used: false, explain_line: '' }
+      }
+      const memoryId =
+        subjectId === '22222222-3333-4333-8444-555555555555'
+          ? 'bbbbbbbb-0000-4000-8000-000000000002'
+          : 'aaaaaaaa-0000-4000-8000-000000000001'
+      return {
+        results: [{ memory_id: memoryId, distance: 0 }],
+        index_used: false,
+        explain_line: '',
       }
     },
     async titanEmbed(): Promise<TitanEmbedding> {
