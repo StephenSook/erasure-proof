@@ -58,9 +58,11 @@ export function Architecture() {
       <h2>CockroachDB tools in use</h2>
       <ul className="muted">
         <li>
-          Distributed Vector Indexing (C-SPANN, preview): the live GTR embedding is indexed with a
+          Distributed Vector Indexing (C-SPANN): the live GTR embedding is indexed with a
           subject_id prefix, so per-subject similarity search is index-accelerated and the erasure
-          purge (setting the vector NULL) is a plain UPDATE the index survives. Euclidean at preview.
+          purge (setting the vector NULL) is a plain UPDATE the index survives. We use L2 (Euclidean)
+          distance; C-SPANN was a preview in v25.2 and is no longer marked preview in the current
+          stable docs (v26.2), which document L2, cosine, and inner-product.
         </li>
         <li>
           Managed MCP Server: the independent verification path. A least-privilege service

@@ -76,9 +76,9 @@ db/            schema migrations and named SQL queries (README)
 services/      api (Go) + cryptod, mcpserver, agents (Python)  (README)
 web/           React + Vite frontend                            (README)
 deploy/local/  local 3-node CockroachDB cluster + HAProxy       (README)
-infra/         IAM policies and ccloud RBAC scaffolding         (README)
+infra/         ccloud RBAC scaffolding + AWS smoke script       (README)
 spikes/        the three week-one gating experiments + findings (README)
-tests/e2e/     end-to-end tests across the full stack           (README)
+tests/         guide to where each guarantee is tested          (README)
 docs/          architecture diagram, API contract, demo script  (README)
 ```
 
@@ -87,15 +87,17 @@ SECURITY, COMPLIANCE) stay at the root where GitHub surfaces them.
 
 ## CockroachDB tools used (all four wired; the hackathon requires two)
 
-- **Distributed Vector Indexing (C-SPANN, preview)**: the live GTR embedding is indexed with a
+- **Distributed Vector Indexing (C-SPANN)**: the live GTR embedding is indexed with a
   `subject_id` prefix, so per-subject similarity search is index-accelerated and the erasure
   purge (setting the vector NULL) is a plain UPDATE the index survives. The console demonstrates
   retrieval live: the similarity search finds the stored memory (the plan line from a real
   EXPLAIN, naming `mem_idx`, is shown on screen), and the same search after erasure finds
-  nothing, because the vector itself is destroyed. Preview finding, verified empirically: any
+  nothing, because the vector itself is destroyed. Verified empirically: any
   non-prefix filter (even `embedding IS NOT NULL`) disqualifies C-SPANN acceleration, so the
   search filters on the prefix column only (`db/queries/memory.sql`). Runs on the free Basic
-  tier. Euclidean at preview. (`db/migrations/0003_vector_index.sql`, spike 2 findings.)
+  tier. We use L2 (Euclidean) `<->` distance; C-SPANN was a preview in v25.2 (L2-only), and the
+  current stable docs (v26.2) no longer mark it preview and document L2, cosine, and inner-product.
+  Our cluster runs v25.4 LTS. (`db/migrations/0003_vector_index.sql`, spike 2 findings.)
 - **Managed MCP Server**: the independent verification path. A least-privilege service account
   reads the decision-log chain head through `cockroachlabs.cloud/mcp` (`select_query`), so a
   verifier does not have to trust our API layer, and every call is audit-logged by CockroachDB

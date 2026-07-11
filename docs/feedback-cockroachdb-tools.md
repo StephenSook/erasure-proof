@@ -4,7 +4,12 @@ Feedback from wiring all four tools into erasure-proof, June 30 to July 10, 2026
 below was observed empirically on CockroachDB Cloud Basic (v25.4) and local v25.2.3; nothing is
 speculation.
 
-## Distributed Vector Indexing (C-SPANN, preview)
+## Distributed Vector Indexing (C-SPANN)
+
+C-SPANN was a preview in v25.2 (L2-only); it is no longer marked preview in the current stable docs
+(v26.2), which document L2, cosine, and inner-product distance. The findings below were observed on
+the versions we ran (Basic v25.4, local v25.2.3).
+
 
 - `feature.vector_index.enabled` CAN be set on the free Basic tier. This was undocumented
   enough that we budgeted a paid-tier fallback we never needed. Worth stating plainly in the
