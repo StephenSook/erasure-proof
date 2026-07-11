@@ -20,7 +20,7 @@ test('the full erasure loop runs in the browser and the proof verifies', async (
 
   // The audit beat: the agent role is denied the forbidden write (SQLSTATE 42501) and the
   // hash chain is intact.
-  await expect(page.getByText('42501')).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText('42501', { exact: true })).toBeVisible({ timeout: 30_000 })
   await expect(page.getByText('intact').first()).toBeVisible()
 
   // The live decision-log timeline is present (mock: snapshot then the erasure row).
@@ -42,7 +42,7 @@ test('a wrong subject on the proof page is caught (replay guard)', async ({ page
   // signature is valid but the subject binding must fail.
   await page.goto('/demo')
   await page.getByRole('button', { name: 'Autopilot' }).click()
-  await expect(page.getByText('42501')).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText('42501', { exact: true })).toBeVisible({ timeout: 30_000 })
 
   await page.getByRole('link', { name: 'Verify', exact: true }).click()
   await page.getByPlaceholder(/subject id/i).fill('99999999-8888-4777-8666-555555555555')

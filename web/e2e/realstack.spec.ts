@@ -29,8 +29,9 @@ test('the whole loop runs against a live backend with zero mocks', async ({ page
   await expect(page.getByText(/0 rows: the vector no longer exists/)).toBeVisible({ timeout: 45_000 })
 
   // Audit: the agent role is denied the forbidden write with a real SQLSTATE 42501, and the
-  // hash chain verifies intact over the real decision_log.
-  await expect(page.getByText('42501')).toBeVisible({ timeout: 30_000 })
+  // hash chain verifies intact over the real decision_log. Exact match: a random S3 proof-key hash
+  // can contain "42501" as a substring, so only the sqlstate cell (=="42501") must match.
+  await expect(page.getByText('42501', { exact: true })).toBeVisible({ timeout: 30_000 })
   await expect(page.getByText('intact').first()).toBeVisible()
 
   // The proof was ECDSA-signed and anchored to the real (moto) S3 Object Lock bucket; the browser

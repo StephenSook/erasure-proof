@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge } from '../components/Badge'
+import { ClusterMap } from '../components/ClusterMap'
 import { CodeBlock } from '../components/CodeBlock'
 import { KeyValue, type KV } from '../components/KeyValue'
 import { LcdCounter } from '../components/LcdCounter'
@@ -492,6 +493,7 @@ export function DemoConsole() {
                 Recorded on the local 3-node cluster: erase committed, then <span className="mono">docker stop roach2</span>,
                 then the committed state was read back from a surviving replica.
               </div>
+              <ClusterMap />
               <CodeBlock>{RECORDED_NODE_KILL}</CodeBlock>
             </>
           )
