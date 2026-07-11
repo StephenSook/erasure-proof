@@ -1,0 +1,13 @@
+# gitleaks config (auto-loaded from the repo root). Extends the default ruleset and allowlists a
+# single demo fixture whose high-entropy hex fields are SHA-256 hashes of public dummy strings, not
+# secrets. Using a path allowlist rather than a commit-pinned .gitleaksignore so it survives a
+# squash-merge (which rewrites the commit SHA the fingerprint would otherwise pin to).
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "mobile/assets/demo-proof.json is a demo erasure certificate: an ECDSA P-256 PUBLIC key, SHA-256 hashes of public dummy strings (subject/chain/wrapped-key/merkle), and a signature over public demo data. It never contains a real secret."
+paths = [
+  '''mobile/assets/demo-proof\.json''',
+]
