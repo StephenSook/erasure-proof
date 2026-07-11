@@ -296,6 +296,44 @@ export function DemoConsole() {
     )
   }
 
+  function timeTravelPanel() {
+    const tt = state.timeTravel
+    return (
+      <div className="live-leak">
+        <div className="live-leak__head">
+          <Badge kind="live">{isMock ? 'Mock (live on deploy)' : 'Live'}</Badge>
+          <button
+            className="btn btn--small"
+            onClick={() => void actions.runTimeTravel()}
+            disabled={state.timeTravelStatus === 'running'}
+          >
+            {state.timeTravelStatus === 'running'
+              ? 'Deleting a row and reading it back...'
+              : 'Prove it: DELETE a row, then read it back from the past'}
+          </button>
+        </div>
+        {state.timeTravelError && <div className="note note--error">{state.timeTravelError}</div>}
+        {tt && state.timeTravelStatus === 'done' && (
+          <>
+            <KeyValue
+              items={[
+                { k: 'throwaway row', v: `${short(tt.memory_id, 16)} inserted, then DELETEd` },
+                { k: 'normal read now', v: `${tt.normal_read_rows} rows ("gone")`, tone: 'ok' },
+                {
+                  k: `AS OF SYSTEM TIME`,
+                  v: `${tt.time_travel_rows} row, still fully readable`,
+                  tone: 'bad',
+                  scramble: true,
+                },
+              ]}
+            />
+            <div className="note">{tt.gc_note}</div>
+          </>
+        )}
+      </div>
+    )
+  }
+
   function retrievalItems(view: SearchView, label: string): KV[] {
     if (view.results.length === 0) {
       return [{ k: label, v: '0 rows: the vector no longer exists', tone: 'ok', scramble: true }]
@@ -368,6 +406,12 @@ export function DemoConsole() {
                   different vector; use the live GPU button below to invert it.
                 </div>
               )}
+              <div className="note">
+                And the embedding is only the second layer of the problem. The first: the database
+                itself remembers. Delete a row with ordinary SQL and CockroachDB can still serve it
+                from MVCC history.
+              </div>
+              {timeTravelPanel()}
               {liveLeakPanel()}
               {titanPanel()}
             </>

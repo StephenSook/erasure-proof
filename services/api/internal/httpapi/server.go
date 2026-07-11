@@ -66,6 +66,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/agent/memory-writer", s.handleAgentMemoryWriter)
 	mux.HandleFunc("POST /api/embedding/titan", s.handleTitanEmbed)
 	mux.HandleFunc("POST /api/memory/search", s.handleMemorySearch)
+	mux.HandleFunc("POST /api/demo/time-travel", s.handleTimeTravel)
 	return mux
 }
 
@@ -503,6 +504,18 @@ func (s *Server) handleAgentConfig(w http.ResponseWriter, r *http.Request) {
 		"memory_writer_available": memWriter,
 		"titan_available":         s.demo.TitanAvailable(),
 	})
+}
+
+func (s *Server) handleTimeTravel(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	view, err := s.demo.TimeTravel(ctx)
+	if err != nil {
+		log.Printf("httpapi: time-travel beat failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "time-travel demo failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
 }
 
 func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {

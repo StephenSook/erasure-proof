@@ -140,7 +140,10 @@ plaintext vector that C-SPANN indexes for search; two-level per-subject envelope
 subject's memory independently destroyable with one row deletion; row-level security scopes the
 agent to the single subject its session declares, fail-closed; and the hash-chained, Merkle-treed
 `decision_log` is itself retained agent memory, with each memory's ciphertext bound to the chain
-head it observed (AES-GCM associated data). (Details: [ARCHITECTURE.md](ARCHITECTURE.md).)
+head it observed (AES-GCM associated data). The console also proves the motivating claim with the
+database's own features: a normally-DELETEd row read back live via `AS OF SYSTEM TIME` (deletion
+is not erasure, within the GC window), and the same C-SPANN similarity search finding a memory
+before erasure and nothing after. (Details: [ARCHITECTURE.md](ARCHITECTURE.md).)
 
 ## Technical Implementation
 

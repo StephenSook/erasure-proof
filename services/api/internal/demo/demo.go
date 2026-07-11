@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -34,12 +35,15 @@ const (
 	qDecisionLogLeaves     = "decision_log_leaves"
 	qDecisionLogIndexed    = "decision_log_indexed"
 	qSearchPrefix          = "search_prefix"
+	qTTInsert              = "tt_insert"
+	qTTDelete              = "tt_delete"
+	qTTCount               = "tt_count"
 )
 
 // RequiredQueries are the named statements the demo gateway looks up; require them at startup.
 var RequiredQueries = []string{
 	qMemoryPreview, qSubjectKeyFingerprint, qErasureRecordGet, qDecisionLogAll, qDecisionLogVerify,
-	qDecisionLogLeaves, qDecisionLogIndexed, qSearchPrefix,
+	qDecisionLogLeaves, qDecisionLogIndexed, qSearchPrefix, qTTInsert, qTTDelete, qTTCount,
 }
 
 // ErrNotFound means the requested subject has no memory or erasure record.
@@ -329,6 +333,67 @@ func (s *Service) Memory(ctx context.Context, subjectID string) (MemoryView, err
 		v.KeyFingerprint = fp
 	} else if !errors.Is(e, pgx.ErrNoRows) {
 		return MemoryView{}, fmt.Errorf("key fingerprint: %w", e)
+	}
+	return v, nil
+}
+
+// TimeTravelView is the "deleted is not gone" beat: a throwaway row is inserted, DELETEd the way
+// most systems "erase", and then read back from the recent past with AS OF SYSTEM TIME. Every
+// field is from the live database; nothing is simulated.
+type TimeTravelView struct {
+	SubjectID string `json:"subject_id"`
+	MemoryID  string `json:"memory_id"`
+	// AsOf is the cluster logical timestamp captured between the insert and the delete.
+	AsOf string `json:"as_of"`
+	// NormalReadRows is what a plain SELECT sees after the DELETE (0: the row is "gone").
+	NormalReadRows int64 `json:"normal_read_rows"`
+	// TimeTravelRows is what the same SELECT sees AS OF SYSTEM TIME (1: still fully readable).
+	TimeTravelRows int64 `json:"time_travel_rows"`
+	// GCNote states the honest window: time travel works within the garbage-collection TTL
+	// (fixed at 4500s on the Basic tier), and backups extend the survival far past it.
+	GCNote string `json:"gc_note"`
+}
+
+// ttTimestampRe pins the captured cluster_logical_timestamp to a plain decimal so the composed
+// AS OF SYSTEM TIME clause (which cannot take a placeholder) can never carry anything else.
+var ttTimestampRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?$`)
+
+// TimeTravel runs the whole beat server-side: insert a throwaway row (fresh random subject, tiny
+// ciphertext placeholders, no key), capture the cluster's logical timestamp, DELETE the row like
+// an ordinary "erasure", then count what a normal read and an AS OF SYSTEM TIME read each see.
+func (s *Service) TimeTravel(ctx context.Context) (TimeTravelView, error) {
+	v := TimeTravelView{
+		GCNote: "AS OF SYSTEM TIME reads MVCC history within the garbage-collection window " +
+			"(fixed at 4500s on CockroachDB Basic). After GC the row versions age out of the " +
+			"live cluster, but backups taken in the window keep them; deletion is not erasure.",
+	}
+	err := s.operator.QueryRow(ctx, s.q.MustGet(qTTInsert),
+		[]byte{0x01}, []byte{0x02}, []byte{0x03}, []byte{0x04}, []byte{0x05},
+	).Scan(&v.SubjectID, &v.MemoryID)
+	if err != nil {
+		return TimeTravelView{}, fmt.Errorf("time-travel insert: %w", err)
+	}
+	// The timestamp must postdate the insert's commit and predate the delete; a fresh statement
+	// on the same pool satisfies both.
+	var asOf string
+	if err := s.operator.QueryRow(ctx, "SELECT cluster_logical_timestamp()::string").Scan(&asOf); err != nil {
+		return TimeTravelView{}, fmt.Errorf("time-travel timestamp: %w", err)
+	}
+	if !ttTimestampRe.MatchString(asOf) {
+		return TimeTravelView{}, fmt.Errorf("unexpected cluster timestamp format %q", asOf)
+	}
+	v.AsOf = asOf
+	if _, err := s.operator.Exec(ctx, s.q.MustGet(qTTDelete), v.MemoryID); err != nil {
+		return TimeTravelView{}, fmt.Errorf("time-travel delete: %w", err)
+	}
+	if err := s.operator.QueryRow(ctx, s.q.MustGet(qTTCount), v.SubjectID).Scan(&v.NormalReadRows); err != nil {
+		return TimeTravelView{}, fmt.Errorf("time-travel normal read: %w", err)
+	}
+	// AS OF SYSTEM TIME requires a constant expression, not a placeholder, so the statement is
+	// composed against the regexp-pinned timestamp above (digits and one dot only).
+	asOfSQL := "SELECT count(*) FROM agent_memory AS OF SYSTEM TIME " + asOf + " WHERE subject_id = $1"
+	if err := s.operator.QueryRow(ctx, asOfSQL, v.SubjectID).Scan(&v.TimeTravelRows); err != nil {
+		return TimeTravelView{}, fmt.Errorf("time-travel past read: %w", err)
 	}
 	return v, nil
 }
