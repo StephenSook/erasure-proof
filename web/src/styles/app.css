@@ -48,6 +48,60 @@ button {
 .page-loading {
   min-height: 60dvh;
 }
+/* Node-kill cluster map (durability stage): rendered from the recorded transcript. */
+.clustermap {
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+}
+.clustermap__links line {
+  stroke: var(--line-strong);
+  stroke-width: 1.5;
+}
+.clustermap__node circle {
+  fill: var(--bg-1);
+  stroke: var(--hue-turquoise);
+  stroke-width: 2;
+  transition:
+    stroke 400ms ease,
+    fill 400ms ease,
+    opacity 400ms ease;
+}
+.clustermap__node .clustermap__label {
+  fill: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.clustermap__node[data-state='leader'] circle {
+  stroke: var(--hue-turquoise);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--hue-turquoise) 60%, transparent));
+}
+.clustermap__node[data-state='follower'] circle {
+  stroke: color-mix(in srgb, var(--hue-turquoise) 55%, var(--line-strong));
+}
+.clustermap__node[data-state='down'] circle {
+  stroke: var(--fg-3);
+  fill: #1c1b1a;
+  opacity: 0.4;
+  animation: clusterFlicker 0.5s steps(2, end) infinite;
+}
+.clustermap__node[data-state='down'] .clustermap__label {
+  fill: var(--bad);
+}
+@keyframes clusterFlicker {
+  0%,
+  100% {
+    opacity: 0.28;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .clustermap__node[data-state='down'] circle {
+    animation: none;
+  }
+}
 .mono {
   font-family: var(--font-mono);
 }
