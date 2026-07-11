@@ -1,0 +1,79 @@
+<!doctype html>
+<!--
+  GitHub social preview card for erasure-proof (1280x640). This is the source of truth for
+  docs/social-card.png; that PNG is uploaded manually at Settings > Social preview (GitHub has no
+  API for it). To regenerate after editing this file:
+    python3 -m http.server 8091            # from the repo root
+    # open http://localhost:8091/docs/social-card.html in a browser at a 1280x640 viewport and
+    # screenshot it, or drive headless Chromium (Playwright/Puppeteer) at that viewport.
+  Brand: warm near-black #1c1b1a + neon turquoise #00ffaa, matching the web console and mobile app.
+-->
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1280px; height: 640px; overflow: hidden; }
+  body {
+    background: #1c1b1a;
+    color: #f6f4f2;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    position: relative;
+    -webkit-font-smoothing: antialiased;
+  }
+  .glow {
+    position: absolute; top: -220px; left: -160px; width: 820px; height: 820px;
+    background: radial-gradient(circle, rgba(0,255,170,0.14), rgba(0,255,170,0) 62%);
+  }
+  .glow2 {
+    position: absolute; bottom: -260px; right: -180px; width: 720px; height: 720px;
+    background: radial-gradient(circle, rgba(38,242,213,0.08), rgba(38,242,213,0) 60%);
+  }
+  .grid {
+    position: absolute; inset: 0; opacity: 0.045;
+    background-image:
+      linear-gradient(#00ffaa 1px, transparent 1px),
+      linear-gradient(90deg, #00ffaa 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+  .wrap {
+    position: absolute; inset: 0; padding: 62px 74px;
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .kicker {
+    font-family: "Menlo", monospace; font-size: 18px; letter-spacing: 4px;
+    text-transform: uppercase; color: #6e6860;
+  }
+  .title { font-size: 142px; font-weight: 800; letter-spacing: -4px; line-height: 0.9; }
+  .title .p { color: #00ffaa; }
+  .rule { width: 168px; height: 6px; background: #00ffaa; border-radius: 3px; margin: 26px 0 22px; }
+  .tag { font-size: 33px; font-weight: 500; line-height: 1.25; color: #d3cfc8; max-width: 1010px; }
+  .foot { display: flex; gap: 13px; align-items: center; flex-wrap: wrap; }
+  .chip {
+    font-family: "Menlo", monospace; font-size: 16px; color: #a29c94;
+    border: 1px solid #3a3733; border-radius: 999px; padding: 8px 16px;
+  }
+  .chip.k { color: #00ffaa; border-color: rgba(0,255,170,0.42); }
+</style>
+</head>
+<body>
+  <div class="glow"></div>
+  <div class="glow2"></div>
+  <div class="grid"></div>
+  <div class="wrap">
+    <div class="kicker">CockroachDB &#215; AWS &#183; Build with Agentic Memory</div>
+    <div>
+      <div class="title">erasure<span class="p">-proof</span></div>
+      <div class="rule"></div>
+      <div class="tag">Provable, statute-compliant erasure for AI agent memory. Crypto-shred the embedding, retain the log the law requires, sign the proof, survive a node kill.</div>
+    </div>
+    <div class="foot">
+      <span class="chip k">Apache-2.0</span>
+      <span class="chip">KMS crypto-erase</span>
+      <span class="chip">SERIALIZABLE + Raft</span>
+      <span class="chip">signed proof &#183; S3 Object Lock</span>
+      <span class="chip">NIST SP 800-88r2</span>
+    </div>
+  </div>
+</body>
+</html>
