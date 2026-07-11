@@ -1,0 +1,22 @@
+{
+  "proof": {
+    "version": 1,
+    "type": "erasure-proof",
+    "subject_hash": "3ffa9e0784d1c3c34d3d57ef568dafa14a392103357b105211661f35f1ec4f31",
+    "occurred_at": "2026-07-10T18:30:00Z",
+    "decision_log_seq": 42,
+    "decision_log_head": "1e05cae8347cebdd14d212d887c39a4721f9dec4c79897cd92cbac2d0525b5e6",
+    "wrapped_key_fingerprint": "24adf301028f2d16ff227499ea1236ed26246d4e89bb55d2e2c7b2b8ee4d88e1",
+    "kms_key_arn": "arn:aws:kms:us-east-1:741030561008:key/demo-subject-cmk",
+    "kms_key_state": "PendingImport",
+    "nist_condition": "NIST SP 800-88 Rev. 2 cryptographic erase (Purge). Irreversible only if the plaintext data key was never persisted and no wrapped key or key material was backed up, escrowed, or stored externally.",
+    "signer_public_key": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2gyx1cmClNms+yOXlmeEBcnY5nNT\nC2T883AJj3hEJEqUOUjkvScOb0Fu/CJJn2RTZrpEpWyKb4A1XfhVPD4ZVQ==\n-----END PUBLIC KEY-----\n",
+    "merkle_root": "7c60c6565956960d53d9405d9cf80388faba64acca2eefe39195328a3fd49dea",
+    "tree_size": 128
+  },
+  "proof_canonical": "{\"decision_log_head\":\"1e05cae8347cebdd14d212d887c39a4721f9dec4c79897cd92cbac2d0525b5e6\",\"decision_log_seq\":42,\"kms_key_arn\":\"arn:aws:kms:us-east-1:741030561008:key/demo-subject-cmk\",\"kms_key_state\":\"PendingImport\",\"merkle_root\":\"7c60c6565956960d53d9405d9cf80388faba64acca2eefe39195328a3fd49dea\",\"nist_condition\":\"NIST SP 800-88 Rev. 2 cryptographic erase (Purge). Irreversible only if the plaintext data key was never persisted and no wrapped key or key material was backed up, escrowed, or stored externally.\",\"occurred_at\":\"2026-07-10T18:30:00Z\",\"signer_public_key\":\"-----BEGIN PUBLIC KEY-----\\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2gyx1cmClNms+yOXlmeEBcnY5nNT\\nC2T883AJj3hEJEqUOUjkvScOb0Fu/CJJn2RTZrpEpWyKb4A1XfhVPD4ZVQ==\\n-----END PUBLIC KEY-----\\n\",\"subject_hash\":\"3ffa9e0784d1c3c34d3d57ef568dafa14a392103357b105211661f35f1ec4f31\",\"tree_size\":128,\"type\":\"erasure-proof\",\"version\":1,\"wrapped_key_fingerprint\":\"24adf301028f2d16ff227499ea1236ed26246d4e89bb55d2e2c7b2b8ee4d88e1\"}",
+  "signature_b64": "MEYCIQCPg0Qlgn/tn2v2XLC/3E/gfbqpivnx/MfG95/YtXZpbwIhAIVL7fXI1tArgwClD75NFkpJKyz9uW2MZ6mKuF/rfLai",
+  "signer_public_key_pem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2gyx1cmClNms+yOXlmeEBcnY5nNT\nC2T883AJj3hEJEqUOUjkvScOb0Fu/CJJn2RTZrpEpWyKb4A1XfhVPD4ZVQ==\n-----END PUBLIC KEY-----\n",
+  "proof_ref": "s3://erasure-proof-anchor/demo/42.json",
+  "committed_at": "2026-07-10T18:30:01Z"
+}

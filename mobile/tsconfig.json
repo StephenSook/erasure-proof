@@ -1,0 +1,8 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true
+  },
+  "comment": "Node test files run under tsx (node:test, .ts import specifiers), a different runtime from the Expo app; they are validated by `npm test`, not the app typecheck.",
+  "exclude": ["**/*.test.ts"]
+}
