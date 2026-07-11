@@ -23,6 +23,7 @@ import {
   type RbacResult,
   type SearchView,
   type StreamHandlers,
+  type TimeTravelView,
   type TitanEmbedding,
   type TreeHead,
 } from './types'
@@ -169,6 +170,20 @@ export function createMockClient(): DemoApi {
         forensics_available: false,
         memory_writer_available: false,
         titan_available: false,
+      }
+    },
+    async timeTravel(): Promise<TimeTravelView> {
+      // Mirrors the real database's documented MVCC semantics (like the 42501 mock), labeled by
+      // the surrounding mock badge: a deleted row is invisible to a normal read and fully
+      // readable AS OF SYSTEM TIME within the GC window. On the deployed console this runs live.
+      return {
+        subject_id: '33333333-4444-4555-8666-777777777777',
+        memory_id: 'cccccccc-0000-4000-8000-000000000003',
+        as_of: '1760000000000000000.0000000001',
+        normal_read_rows: 0,
+        time_travel_rows: 1,
+        gc_note:
+          'AS OF SYSTEM TIME reads MVCC history within the garbage-collection window (fixed at 4500s on CockroachDB Basic). After GC the row versions age out of the live cluster, but backups taken in the window keep them; deletion is not erasure.',
       }
     },
     async searchMemory(subject: string): Promise<SearchView> {

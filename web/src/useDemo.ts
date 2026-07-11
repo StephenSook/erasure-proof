@@ -13,6 +13,7 @@ import {
   type ProofView,
   type RbacResult,
   type SearchView,
+  type TimeTravelView,
   type TitanEmbedding,
 } from './api'
 import { demoMemory } from './data/demoMemory'
@@ -41,6 +42,10 @@ export interface DemoState {
   memWriterStatus: 'idle' | 'running' | 'done' | 'error'
   memWriterError?: string
   memWriterAvailable?: boolean
+  // The "deleted is not gone" beat: a live DELETE then AS OF SYSTEM TIME read-back.
+  timeTravel?: TimeTravelView
+  timeTravelStatus: 'idle' | 'running' | 'done' | 'error'
+  timeTravelError?: string
   // C-SPANN similarity search of the current subject: found before erasure, empty after.
   searchBefore?: SearchView
   searchAfter?: SearchView
@@ -79,6 +84,7 @@ const initialState = (): DemoState => ({
   agentStatus: 'idle',
   memWriterStatus: 'idle',
   titanStatus: 'idle',
+  timeTravelStatus: 'idle',
   streamRows: [],
   streamStatus: 'connecting',
   status: idleStatus(),
@@ -293,6 +299,22 @@ export function useDemo(injected?: DemoApi) {
     }
   }, [])
 
+  // Run the "deleted is not gone" beat: the server inserts a throwaway row, DELETEs it, and reads
+  // it back from the recent past. Everything in the result is the live database's own answer.
+  const runTimeTravel = useCallback(async () => {
+    setState((s) => ({ ...s, timeTravelStatus: 'running', timeTravelError: undefined }))
+    try {
+      const timeTravel = await clientRef.current!.timeTravel()
+      setState((s) => ({ ...s, timeTravel, timeTravelStatus: 'done' }))
+    } catch (e) {
+      setState((s) => ({
+        ...s,
+        timeTravelStatus: 'error',
+        timeTravelError: e instanceof Error ? e.message : String(e),
+      }))
+    }
+  }, [])
+
   const runEnvelope = useCallback(
     () => step('envelope', async (c) => ({ memory: await c.getMemory(requireSubject()) })),
     [step, requireSubject],
@@ -379,6 +401,7 @@ export function useDemo(injected?: DemoApi) {
       runForensics,
       runMemoryWriter,
       runTitan,
+      runTimeTravel,
       runEnvelope,
       runErase,
       runDurability,
@@ -395,6 +418,7 @@ export function useDemo(injected?: DemoApi) {
       runForensics,
       runMemoryWriter,
       runTitan,
+      runTimeTravel,
       runEnvelope,
       runErase,
       runDurability,

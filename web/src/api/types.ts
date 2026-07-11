@@ -146,6 +146,18 @@ export interface AgentConfig {
   titan_available?: boolean
 }
 
+// TimeTravelView is the "deleted is not gone" beat, run entirely server-side against the live
+// database: insert a throwaway row, DELETE it the way most systems "erase", then read it back
+// from the recent past with AS OF SYSTEM TIME.
+export interface TimeTravelView {
+  subject_id: string
+  memory_id: string
+  as_of: string
+  normal_read_rows: number
+  time_travel_rows: number
+  gc_note: string
+}
+
 // SearchHit is one similarity result from the C-SPANN prefix search.
 export interface SearchHit {
   memory_id: string
@@ -215,6 +227,7 @@ export interface DemoApi {
   writeMemory(turn: string): Promise<MemoryWriterResult>
   titanEmbed(text: string): Promise<TitanEmbedding>
   searchMemory(subjectId: string, embeddingB64: string, k?: number): Promise<SearchView>
+  timeTravel(): Promise<TimeTravelView>
   erase(subjectId: string, lawfulBasis?: string): Promise<EraseResponse>
   getProof(subjectId: string): Promise<ProofView>
   getDecisionLog(): Promise<DecisionRow[]>

@@ -62,3 +62,21 @@ SELECT seq, hash FROM decision_log ORDER BY seq;
 SELECT seq, subject_hash, action, lawful_basis, hash
 FROM decision_log
 ORDER BY seq;
+
+-- name: tt_insert
+-- Time-travel beat: store a throwaway memory row for a fresh random subject (no subject key; the
+-- row exists only to be deleted seconds later). Returns the generated ids.
+INSERT INTO agent_memory (subject_id, content_ciphertext, embedding_ciphertext,
+                          nonce_content, nonce_embedding, wrapped_key)
+VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
+RETURNING subject_id, id;
+
+-- name: tt_delete
+-- Time-travel beat: a NORMAL SQL DELETE of the throwaway row, the thing most systems call erasure.
+DELETE FROM agent_memory WHERE id = $1;
+
+-- name: tt_count
+-- Time-travel beat: how many rows a normal read sees for the throwaway subject (0 after DELETE).
+-- The AS OF SYSTEM TIME variant cannot be a named query: the clause requires a constant
+-- expression, not a placeholder, so it is composed in Go against a strictly validated timestamp.
+SELECT count(*) FROM agent_memory WHERE subject_id = $1;

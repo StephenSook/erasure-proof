@@ -20,6 +20,7 @@ import {
   type ProofView,
   type RbacResult,
   type SearchView,
+  type TimeTravelView,
   type TitanEmbedding,
   type TreeHead,
 } from './types'
@@ -85,6 +86,9 @@ export function createHttpClient(base = ''): DemoApi {
     },
     titanEmbed(text) {
       return request<TitanEmbedding>(b, 'POST', '/api/embedding/titan', { text })
+    },
+    timeTravel() {
+      return request<TimeTravelView>(b, 'POST', '/api/demo/time-travel')
     },
     searchMemory(subjectId, embeddingB64, k = 3) {
       return request<SearchView>(b, 'POST', '/api/memory/search', {
