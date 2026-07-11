@@ -11,6 +11,11 @@ ECDSA-signed proof anchored in write-once storage, and proves the erasure surviv
 
 This is incident response and compliance for agent memory. It is not detection.
 
+CockroachDB positions itself as the system of record for agentic memory: durable, consistent, and
+surviving failure. A system of record for a person's memory is only complete if it can also prove
+that memory is gone when the law demands it. That is the gap this project closes, on the same
+database that stores the memory in the first place.
+
 > Status: in active development for the CockroachDB x AWS "Build with Agentic Memory" hackathon
 > (submission deadline Aug 18, 2026). Component readiness is tracked honestly in the
 > [Capability tiers](#capability-tiers) table below and on the app's `/trust` page. Nothing is
