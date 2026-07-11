@@ -1,6 +1,15 @@
 # erasure-proof
 
-Provable, durable, statute-compliant erasure for AI agent memory, on CockroachDB and AWS.
+**Provable, durable, statute-compliant erasure for AI agent memory, on CockroachDB and AWS.**
+
+[![CI](https://github.com/StephenSook/erasure-proof/actions/workflows/ci.yml/badge.svg)](https://github.com/StephenSook/erasure-proof/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
+[![Go](https://img.shields.io/badge/Go-pgx%20%2B%20crdb%20retry-00ADD8.svg?logo=go&logoColor=white)](./services/api)
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB.svg?logo=python&logoColor=white)](./services/cryptod)
+[![React](https://img.shields.io/badge/React-19%20%2B%20Vite-61DAFB.svg?logo=react&logoColor=black)](./web)
+[![CockroachDB](https://img.shields.io/badge/CockroachDB-v25.4%20LTS-6933FF.svg?logo=cockroachlabs&logoColor=white)](https://www.cockroachlabs.com/)
+[![AWS](https://img.shields.io/badge/AWS-KMS%20%C2%B7%20S3%20Object%20Lock%20%C2%B7%20Bedrock-232F3E.svg?logo=amazonaws&logoColor=white)](./deploy/aws)
+[![NIST SP 800-88r2](https://img.shields.io/badge/NIST-SP_800--88r2_crypto_erase-0b5394.svg)](https://csrc.nist.gov/pubs/sp/800/88/r2/final)
 
 When a regulator asks whether a person's data is truly gone from an AI agent's memory, most
 systems can only prove they deleted a row. Deleting the row is not enough: the embedding is still
@@ -20,6 +29,15 @@ database that stores the memory in the first place.
 > (submission deadline Aug 18, 2026). Component readiness is tracked honestly in the
 > [Capability tiers](#capability-tiers) table below and on the app's `/trust` page. Nothing is
 > claimed as live until it ships and is verifiable in this repo.
+
+## Surfaces
+
+| Surface | Where |
+|---|---|
+| Web console | judge-facing deploy lands early August (single CloudFront URL); runs locally today, see [Setup and run](#setup-and-run) |
+| Read-only forensics MCP server | judge-connectable over HTTP at the deploy (`services/mcpserver`, four audit-logged tools) |
+| Offline mobile verifier | real now: Expo / React Native, pure-JS P-256, verifies an erasure certificate with no server and no network; Android APK via `eas build`, iOS via the simulator ([mobile/](mobile/)) |
+| Full stack, locally | runs today via [Setup and run](#setup-and-run) |
 
 ## The one closeable loop
 
@@ -198,11 +216,13 @@ proof. (On the relationship to the emerging PCT standard, see
 
 ## Production Readiness
 
-Nine CI jobs (Go race tests against a real CockroachDB, Python property tests under moto, web
-typecheck/lint/tests, full-history secret scanning, a db-smoke job that proves the append-only and
+Ten CI jobs (Go race tests against a real CockroachDB, Python property tests under moto, web
+typecheck/lint/tests, a mobile job that typechecks and byte-parity-tests the offline verifier,
+full-history secret scanning, a db-smoke job that proves the append-only and
 locking-privilege invariants as the REAL roles not root, a mock-mode browser E2E, and a real-stack
 browser E2E that drives the whole loop with zero mocks over real HTTP, SQL, and crypto against
-moto-backed KMS and S3 Object Lock) run on every push. The
+moto-backed KMS and S3 Object Lock) run on every push, and a nightly node-kill workflow gates the
+Raft durability beat (all three runs must survive the kill). The
 deploy is code (`deploy/aws/`: one CloudFront URL, always-on Fargate, circuit-breaker rollback,
 three separated IAM principals with confused-deputy conditions) and was rehearsed end to end:
 deployed, smoked live including a full erase-and-prove loop on the cloud cluster, and torn down
