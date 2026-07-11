@@ -270,7 +270,7 @@ func TestTimeTravel_DeletedRowStillReadableInThePast(t *testing.T) {
 	if v.TimeTravelRows != 1 {
 		t.Errorf("time-travel rows = %d, want 1 (MVCC history within the GC window)", v.TimeTravelRows)
 	}
-	if v.AsOf == "" || v.SubjectID == "" || v.MemoryID == "" {
+	if v.AsOf == "" || v.SubjectID == "" {
 		t.Errorf("view missing fields: %+v", v)
 	}
 }

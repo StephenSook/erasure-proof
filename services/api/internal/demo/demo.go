@@ -342,7 +342,6 @@ func (s *Service) Memory(ctx context.Context, subjectID string) (MemoryView, err
 // field is from the live database; nothing is simulated.
 type TimeTravelView struct {
 	SubjectID string `json:"subject_id"`
-	MemoryID  string `json:"memory_id"`
 	// AsOf is the cluster logical timestamp captured between the insert and the delete.
 	AsOf string `json:"as_of"`
 	// NormalReadRows is what a plain SELECT sees after the DELETE (0: the row is "gone").
@@ -363,13 +362,15 @@ var ttTimestampRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?$`)
 // an ordinary "erasure", then count what a normal read and an AS OF SYSTEM TIME read each see.
 func (s *Service) TimeTravel(ctx context.Context) (TimeTravelView, error) {
 	v := TimeTravelView{
-		GCNote: "AS OF SYSTEM TIME reads MVCC history within the garbage-collection window " +
-			"(fixed at 4500s on CockroachDB Basic). After GC the row versions age out of the " +
-			"live cluster, but backups taken in the window keep them; deletion is not erasure.",
+		GCNote: "This is the wrapped-key row the erasure DELETEs. Read back AS OF SYSTEM TIME " +
+			"within the garbage-collection window (fixed at 4500s on CockroachDB Basic), the " +
+			"deleted row is still fully readable; backups keep it past GC too. Deleting the row " +
+			"is not erasure, which is why the real erasure destroys the KEY in KMS.",
 	}
+	// Dummy wrapped-key row values (bytes + arn text + origin); nothing sensitive, deleted at once.
 	err := s.operator.QueryRow(ctx, s.q.MustGet(qTTInsert),
-		[]byte{0x01}, []byte{0x02}, []byte{0x03}, []byte{0x04}, []byte{0x05},
-	).Scan(&v.SubjectID, &v.MemoryID)
+		[]byte{0x01}, "arn:aws:kms:demo:time-travel", "GENERATE_DATA_KEY", []byte{0x02},
+	).Scan(&v.SubjectID)
 	if err != nil {
 		return TimeTravelView{}, fmt.Errorf("time-travel insert: %w", err)
 	}
@@ -383,7 +384,7 @@ func (s *Service) TimeTravel(ctx context.Context) (TimeTravelView, error) {
 		return TimeTravelView{}, fmt.Errorf("unexpected cluster timestamp format %q", asOf)
 	}
 	v.AsOf = asOf
-	if _, err := s.operator.Exec(ctx, s.q.MustGet(qTTDelete), v.MemoryID); err != nil {
+	if _, err := s.operator.Exec(ctx, s.q.MustGet(qTTDelete), v.SubjectID); err != nil {
 		return TimeTravelView{}, fmt.Errorf("time-travel delete: %w", err)
 	}
 	if err := s.operator.QueryRow(ctx, s.q.MustGet(qTTCount), v.SubjectID).Scan(&v.NormalReadRows); err != nil {
@@ -391,7 +392,7 @@ func (s *Service) TimeTravel(ctx context.Context) (TimeTravelView, error) {
 	}
 	// AS OF SYSTEM TIME requires a constant expression, not a placeholder, so the statement is
 	// composed against the regexp-pinned timestamp above (digits and one dot only).
-	asOfSQL := "SELECT count(*) FROM agent_memory AS OF SYSTEM TIME " + asOf + " WHERE subject_id = $1"
+	asOfSQL := "SELECT count(*) FROM subject_keys AS OF SYSTEM TIME " + asOf + " WHERE subject_id = $1"
 	if err := s.operator.QueryRow(ctx, asOfSQL, v.SubjectID).Scan(&v.TimeTravelRows); err != nil {
 		return TimeTravelView{}, fmt.Errorf("time-travel past read: %w", err)
 	}
@@ -434,9 +435,19 @@ func (s *Service) Search(ctx context.Context, subjectID, embeddingB64 string, k 
 	defer rows.Close()
 	for rows.Next() {
 		var h SearchHit
-		if err := rows.Scan(&h.MemoryID, &h.Distance); err != nil {
+		// The erasure NULLs the embedding but keeps the row, so `embedding <-> $2` is NULL for an
+		// erased subject. When the C-SPANN index serves the query those rows never appear; when the
+		// planner falls back to a scan (tiny tables), they do, with a NULL distance. Post-filter them
+		// out in app code, exactly as the C-SPANN non-prefix-filter guidance prescribes, so the
+		// "found before, nothing after" semantics hold under either plan.
+		var dist *float64
+		if err := rows.Scan(&h.MemoryID, &dist); err != nil {
 			return SearchView{}, fmt.Errorf("vector search scan: %w", err)
 		}
+		if dist == nil {
+			continue // erased row (vector destroyed): not a retrievable memory
+		}
+		h.Distance = *dist
 		v.Results = append(v.Results, h)
 	}
 	if err := rows.Err(); err != nil {

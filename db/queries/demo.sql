@@ -64,19 +64,22 @@ FROM decision_log
 ORDER BY seq;
 
 -- name: tt_insert
--- Time-travel beat: store a throwaway memory row for a fresh random subject (no subject key; the
--- row exists only to be deleted seconds later). Returns the generated ids.
-INSERT INTO agent_memory (subject_id, content_ciphertext, embedding_ciphertext,
-                          nonce_content, nonce_embedding, wrapped_key)
-VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)
-RETURNING subject_id, id;
+-- Time-travel beat: store a throwaway wrapped-key row for a fresh random subject (dummy bytes; the
+-- row exists only to be deleted seconds later). This is deliberately subject_keys, the very table
+-- the erasure DELETEs: it shows that deleting the wrapped-key row leaves it recoverable in the
+-- recent past, which is exactly why real erasure destroys the KEY in KMS, not just the row. The
+-- operator role legitimately holds DELETE on subject_keys (the erasure path uses it); it does NOT
+-- hold DELETE on agent_memory (whose vector is UPDATEd to NULL), so the beat runs where it should.
+INSERT INTO subject_keys (subject_id, wrapped_key, kms_key_arn, key_origin, wrapped_key_fingerprint)
+VALUES (gen_random_uuid(), $1, $2, $3, $4)
+RETURNING subject_id;
 
 -- name: tt_delete
 -- Time-travel beat: a NORMAL SQL DELETE of the throwaway row, the thing most systems call erasure.
-DELETE FROM agent_memory WHERE id = $1;
+DELETE FROM subject_keys WHERE subject_id = $1;
 
 -- name: tt_count
 -- Time-travel beat: how many rows a normal read sees for the throwaway subject (0 after DELETE).
 -- The AS OF SYSTEM TIME variant cannot be a named query: the clause requires a constant
 -- expression, not a placeholder, so it is composed in Go against a strictly validated timestamp.
-SELECT count(*) FROM agent_memory WHERE subject_id = $1;
+SELECT count(*) FROM subject_keys WHERE subject_id = $1;

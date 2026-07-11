@@ -261,3 +261,68 @@ jobs:
           q operator "SELECT count(*) FROM agent_memory" | grep -qx "2" || { echo "::error::operator view restricted"; exit 1; }
           q forensics_reader "SELECT count(*) FROM agent_memory" | grep -qx "2" || { echo "::error::forensics view restricted"; exit 1; }
           echo "RLS matrix OK"
+
+  e2e-realstack:
+    # The whole loop, ZERO mocks: a real browser drives store -> C-SPANN search -> AS OF SYSTEM
+    # TIME -> SERIALIZABLE erasure -> ECDSA sign + S3 Object Lock anchor -> browser proof verify ->
+    # 42501 RBAC denial, wired over real HTTP + SQL + crypto. AWS is moto-server (fake KMS + S3), so
+    # nothing is billed; the Modal GPU and Bedrock paths stay unwired (the inversion serves its
+    # recorded golden run). Proves "everything is actually wired" on every push.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Start CockroachDB, apply migrations, enable rangefeeds
+        run: |
+          docker run -d --name crdb -p 26257:26257 \
+            cockroachdb/cockroach:latest-v25.2 start-single-node --insecure
+          for i in $(seq 1 40); do
+            docker exec crdb ./cockroach sql --insecure -e "SELECT 1" >/dev/null 2>&1 && break
+            sleep 2
+          done
+          docker exec crdb ./cockroach sql --insecure -e "CREATE DATABASE erasure"
+          docker exec crdb ./cockroach sql --insecure -e "SET CLUSTER SETTING kv.rangefeed.enabled = true"
+          # SET CLUSTER SETTING cannot run inside a multi-statement batch, so 0003 is applied
+          # statement-by-statement; the rest of the migrations pipe in whole.
+          for f in db/migrations/0001_schema.sql db/migrations/0002_roles.sql; do
+            docker exec -i crdb ./cockroach sql --insecure -d erasure < "$f"
+          done
+          docker exec crdb ./cockroach sql --insecure -d erasure -e "SET CLUSTER SETTING feature.vector_index.enabled = true"
+          docker exec crdb ./cockroach sql --insecure -d erasure -e "SET sql_safe_updates = false; CREATE VECTOR INDEX IF NOT EXISTS mem_idx ON agent_memory (subject_id, embedding)"
+          for f in db/migrations/0004_rls.sql db/migrations/0005_proof_document.sql; do
+            docker exec -i crdb ./cockroach sql --insecure -d erasure < "$f"
+          done
+      - name: Install cryptod deps
+        working-directory: services/cryptod
+        run: |
+          uv venv --python 3.12
+          uv pip install -e ".[dev]" 'moto[server]'
+      - name: Install web deps + Playwright
+        working-directory: web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Warm the Go build cache (so the script's go run starts fast)
+        working-directory: services/api
+        run: go build ./...
+      - name: Bring up the real stack (moto + cryptod + api)
+        run: bash deploy/local/realstack-ci.sh up
+      - name: Real-stack browser E2E (zero mocks)
+        working-directory: web
+        run: npx playwright test --config playwright.realstack.config.ts
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-realstack-report
+          path: web/playwright-report/
+          retention-days: 7
