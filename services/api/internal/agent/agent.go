@@ -200,14 +200,24 @@ func (a *ForensicsAgent) Audit(ctx context.Context, subjectID string) (AuditResu
 		messages = append(messages, Message{Role: RoleUser, Blocks: results})
 	}
 
-	// Out of tool rounds: force a final verdict with no tools so the loop always terminates.
+	// Out of tool rounds: force a final verdict. The transcript now carries tool_use/tool_result
+	// blocks, and Bedrock Converse rejects a request that has tool blocks but no toolConfig, so we must
+	// still pass the tool specs even though we want prose. The prompt tells the model to stop calling
+	// tools; if it emits another tool_use anyway, final.Text is empty, so we substitute an explicit
+	// inconclusive verdict rather than crashing or returning a blank. EvidenceProven stays authoritative
+	// (computed from the tool trace, not the model text), so the UI verdict is correct regardless.
 	final, err := a.converser.Converse(ctx,
-		auditSystem+" You have no more tool calls; give your final verdict now.", messages, nil)
+		auditSystem+" You have no more tool calls; give your final verdict now as text, without calling any tool.",
+		messages, ForensicsToolSpecs)
 	if err != nil {
 		return AuditResult{}, fmt.Errorf("final converse: %w", err)
 	}
+	verdict := final.Text
+	if verdict == "" {
+		verdict = "NOT PROVEN: the audit did not reach a text verdict within the tool-call budget."
+	}
 	return AuditResult{
-		Verdict: final.Text, ToolCalls: calls, Rounds: a.maxRounds,
+		Verdict: verdict, ToolCalls: calls, Rounds: a.maxRounds,
 		EvidenceProven: EvidenceProven(calls),
 	}, nil
 }

@@ -116,13 +116,22 @@ class ForensicsAgent:
                 )
             messages.append({"role": "user", "content": tool_results})
 
-        # Out of tool rounds: force a final verdict with no tools so the loop always terminates.
+        # Out of tool rounds: force a final verdict. The transcript now carries tool_use and
+        # tool_result blocks, and Bedrock Converse rejects a request that has tool blocks but no
+        # toolConfig, so pass the specs even though we want prose; the prompt tells the model to
+        # stop calling tools. If it emits another tool_use anyway, final.text is empty, so we
+        # substitute an explicit inconclusive verdict rather than returning a blank.
         final = self._converser.converse(
-            AUDIT_SYSTEM + " You have no more tool calls; give your final verdict now.",
+            AUDIT_SYSTEM
+            + " You have no more tool calls; give your final verdict now as text,"
+            + " without calling any tool.",
             messages,
-            None,
+            TOOL_SPECS,
         )
-        return AuditResult(final.text, calls, self._max_rounds)
+        verdict = final.text or (
+            "NOT PROVEN: the audit did not reach a text verdict within the tool-call budget."
+        )
+        return AuditResult(verdict, calls, self._max_rounds)
 
     def _dispatch(self, tu: ToolUse) -> dict[str, Any]:
         # A tool error is returned to the model as evidence (and recorded in the trace) rather than
