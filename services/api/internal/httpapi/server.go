@@ -356,7 +356,9 @@ func (s *Server) handleDemoInversionConfig(w http.ResponseWriter, r *http.Reques
 	defer cancel()
 	v, err := s.demo.InversionConfig(ctx)
 	if err != nil {
-		// A config probe failure is not fatal to the page; report live unavailable and move on.
+		// A config probe failure is not fatal to the page; report live unavailable and move on. Log
+		// it so an outage (cryptod down) is distinguishable from an intentionally unwired deploy.
+		log.Printf("demo inversion config probe failed: %v", err)
 		writeJSON(w, http.StatusOK, map[string]any{"live_available": false})
 		return
 	}

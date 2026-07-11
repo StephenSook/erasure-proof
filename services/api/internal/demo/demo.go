@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 	"sync"
@@ -204,6 +205,9 @@ var ErrMemoryWriterUnavailable = errors.New("memory writer unavailable")
 func (s *Service) EmbedAvailable(ctx context.Context) bool {
 	cfg, err := s.inverter.EmbedConfig(ctx)
 	if err != nil {
+		// A probe failure (cryptod down, network) is not fatal to the page, but log it so an outage
+		// is distinguishable from an intentionally unwired deploy rather than silently reading false.
+		log.Printf("embed-availability probe failed: %v", err)
 		return false
 	}
 	ok, _ := cfg["embed_available"].(bool)
@@ -386,7 +390,11 @@ func (s *Service) TimeTravel(ctx context.Context) (TimeTravelView, error) {
 	defer func() {
 		cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_, _ = s.operator.Exec(cctx, s.q.MustGet(qTTDelete), v.SubjectID)
+		if _, e := s.operator.Exec(cctx, s.q.MustGet(qTTDelete), v.SubjectID); e != nil {
+			// Both the main-path delete and this deferred delete failing would leave a throwaway
+			// row in subject_keys; log it so the hygiene debt is visible rather than silent.
+			log.Printf("time-travel demo cleanup failed for subject %s: %v", v.SubjectID, e)
+		}
 	}()
 	// The timestamp must postdate the insert's commit and predate the delete; a fresh statement
 	// on the same pool satisfies both.

@@ -447,7 +447,13 @@ export function DemoConsole() {
                   { k: 'decision_log seq', v: String(state.erase.result.decision_log_seq) },
                   { k: 'key origin', v: state.erase.result.key_origin },
                   { k: 'kms key', v: short(state.erase.result.kms_key_arn, 32) },
-                  { k: 'proof', v: state.erase.proof_ref ?? '(anchoring pending)', tone: 'ok' },
+                  {
+                    k: 'proof',
+                    v: state.erase.proof_ref ?? '(anchoring pending)',
+                    // Green only once the proof is actually anchored; neutral while pending, so a
+                    // deferred or failed anchor is not painted the same success colour as a real one.
+                    tone: state.erase.proof_pending ? undefined : 'ok',
+                  },
                 ]}
               />
             )}
