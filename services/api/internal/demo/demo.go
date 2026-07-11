@@ -441,47 +441,70 @@ func (s *Service) Search(ctx context.Context, subjectID, embeddingB64 string, k 
 	if k < 1 || k > 10 {
 		k = 3
 	}
-	// Over-fetch, then trim to k after dropping NULL-distance rows. CockroachDB sorts NULLs FIRST
-	// in ascending order (a documented divergence from Postgres NULLS LAST), so under the scan plan
-	// an erased subject's NULL-distance rows sort ahead of live rows and would consume top-k slots
-	// if we limited to k in SQL, silently dropping real results. The C-SPANN index plan never emits
-	// NULL rows, so this margin only guards the scan fallback; it is correct for any subject with
-	// fewer than searchOverfetch erased memories, which covers every realistic case (the demo has
-	// one memory per subject). A no-filter LIMIT keeps the query C-SPANN-eligible (a WHERE
-	// embedding IS NOT NULL would disqualify the index, per issue #146145).
-	fetchN := k + searchOverfetch
-	v := SearchView{Results: []SearchHit{}}
-	rows, err := s.operator.Query(ctx, s.q.MustGet(qSearchPrefix), subjectID, vec, fetchN)
+	// The primary query keeps LIMIT k so it stays C-SPANN-eligible (a larger LIMIT or a WHERE
+	// embedding IS NOT NULL filter both make the planner drop the vector index, per issue #146145).
+	// The C-SPANN index plan never emits NULL-distance rows, so under it LIMIT k is exactly correct.
+	v, rawCount, err := s.searchOnce(ctx, subjectID, vec, k)
 	if err != nil {
-		return SearchView{}, fmt.Errorf("vector search: %w", err)
+		return SearchView{}, err
+	}
+	// Only the scan fallback (tiny tables) can leak erased rows: CockroachDB sorts NULL distances
+	// FIRST (a documented divergence from Postgres NULLS LAST), so a scan can return k rows of which
+	// some are the erased subject's NULLs, displacing live results past the limit. Detect exactly
+	// that (the raw row count hit k but live results came up short) and re-fetch wide once, trimming
+	// to k after dropping NULLs. The common path (index plan, or a subject with <= k memories) never
+	// takes this branch, so the on-screen mem_idx plan and the demo's one-memory-per-subject case
+	// are untouched.
+	if rawCount == k && len(v.Results) < k {
+		wide, _, werr := s.searchOnce(ctx, subjectID, vec, k+searchOverfetch)
+		if werr != nil {
+			return SearchView{}, werr
+		}
+		if len(wide.Results) > k {
+			wide.Results = wide.Results[:k]
+		}
+		wide.IndexUsed, wide.ExplainLine = v.IndexUsed, v.ExplainLine // keep the LIMIT-k plan line
+		v = wide
+	}
+	return v, nil
+}
+
+// searchOnce runs the similarity search at a given SQL LIMIT and returns the live (non-NULL) hits
+// (bounded by that limit), plus the raw row count the query returned (including NULL-distance
+// erased rows, which it filters out). The EXPLAIN of the same limit fills IndexUsed / ExplainLine
+// from the database's own plan. The caller trims the hits to the requested k.
+func (s *Service) searchOnce(ctx context.Context, subjectID, vec string, limit int) (SearchView, int, error) {
+	v := SearchView{Results: []SearchHit{}}
+	raw := 0
+	rows, err := s.operator.Query(ctx, s.q.MustGet(qSearchPrefix), subjectID, vec, limit)
+	if err != nil {
+		return SearchView{}, 0, fmt.Errorf("vector search: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
+		raw++
 		var h SearchHit
 		var dist *float64
 		if err := rows.Scan(&h.MemoryID, &dist); err != nil {
-			return SearchView{}, fmt.Errorf("vector search scan: %w", err)
+			return SearchView{}, 0, fmt.Errorf("vector search scan: %w", err)
 		}
 		if dist == nil {
 			continue // erased row (vector destroyed): not a retrievable memory
 		}
 		h.Distance = *dist
 		v.Results = append(v.Results, h)
-		if len(v.Results) == k {
-			break // enough live results; the rest are farther or NULL
-		}
 	}
 	if err := rows.Err(); err != nil {
-		return SearchView{}, fmt.Errorf("vector search rows: %w", err)
+		return SearchView{}, 0, fmt.Errorf("vector search rows: %w", err)
 	}
 
 	// Ask the database how it planned the query and report ITS answer. EXPLAIN does not execute,
 	// so this is cheap; a plan that stopped using mem_idx (index disabled, stats change) shows up
 	// as index_used=false on the console instead of a silently false claim.
-	ex, err := s.operator.Query(ctx, "EXPLAIN "+s.q.MustGet(qSearchPrefix), subjectID, vec, fetchN)
+	ex, err := s.operator.Query(ctx, "EXPLAIN "+s.q.MustGet(qSearchPrefix), subjectID, vec, limit)
 	if err != nil {
 		// The search itself succeeded; a failed EXPLAIN degrades to "not proven", never an error.
-		return v, nil
+		return v, raw, nil
 	}
 	defer ex.Close()
 	for ex.Next() {
@@ -495,7 +518,7 @@ func (s *Service) Search(ctx context.Context, subjectID, embeddingB64 string, k 
 			break
 		}
 	}
-	return v, nil
+	return v, raw, nil
 }
 
 // ProofView is a subject's recorded erasure-proof state, including the signed proof document the
