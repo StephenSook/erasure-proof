@@ -2,9 +2,18 @@
 // state machine depends on it, so disabling it (reduced-motion users, ?minimal=1, test runners
 // without matchMedia) collapses the UI to instant final states with zero behaviour change.
 
-type MotionWindow = Pick<Window, 'matchMedia' | 'location'> & { sessionStorage?: Storage }
+type MotionWindow = Pick<Window, 'matchMedia' | 'location'>
 
-const MINIMAL_KEY = 'erasure-proof:minimal'
+// ?minimal=1 is latched in an in-memory module variable so it survives internal SPA navigation
+// (router links drop the query string). A module variable is used rather than sessionStorage because
+// demo artifacts must not touch web storage (project rule); the latch resets on a full page reload,
+// where the query string is re-read anyway.
+let minimalLatched = false
+
+// Test-only hook to clear the in-memory latch between cases. Not referenced by the app.
+export function resetMotionLatchForTest(): void {
+  minimalLatched = false
+}
 
 export function motionEnabled(
   win: MotionWindow | undefined = typeof window === 'undefined' ? undefined : window,
@@ -16,18 +25,9 @@ export function motionEnabled(
   if (win.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     return false
   }
-  // ?minimal=1 is latched into sessionStorage so it survives internal navigation (router links drop
-  // the query string). sessionStorage can throw in some privacy modes; treat that as not latched.
-  try {
-    if (new URLSearchParams(win.location.search).get('minimal') === '1') {
-      win.sessionStorage?.setItem(MINIMAL_KEY, '1')
-      return false
-    }
-    if (win.sessionStorage?.getItem(MINIMAL_KEY) === '1') {
-      return false
-    }
-  } catch {
-    // Storage unavailable: fall through with just the query-string check above.
+  if (new URLSearchParams(win.location.search).get('minimal') === '1') {
+    minimalLatched = true
+    return false
   }
-  return true
+  return !minimalLatched
 }
