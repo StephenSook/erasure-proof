@@ -275,6 +275,53 @@ func TestTimeTravel_DeletedRowStillReadableInThePast(t *testing.T) {
 	}
 }
 
+func TestSearch_ErasedRowDoesNotDropLiveResults(t *testing.T) {
+	// Regression for the NULLS-FIRST + LIMIT footgun: CockroachDB sorts NULL distances first, so an
+	// erased row (embedding NULL) under the scan plan must not consume a top-k slot and hide a live
+	// memory. Seed k+1 memories for one subject, NULL one, and require all k live rows to come back.
+	st, admin := setup(t)
+	id := seedSubject(t, admin) // memory #1 (vector 0.01 x 768)
+	svc := demo.New(st, stubInverter{})
+	ctx := context.Background()
+
+	// Add three more memories with distinct vectors so distances differ.
+	for _, val := range []string{"0.02", "0.03", "0.04"} {
+		lit := "[" + strings.Repeat(val+",", 767) + val + "]"
+		if _, err := admin.Exec(ctx,
+			`INSERT INTO agent_memory (subject_id, content_ciphertext, embedding, embedding_ciphertext,
+				nonce_content, nonce_embedding, wrapped_key)
+			 VALUES ($1, b'\x01', $2, b'\x02', b'\x03', b'\x04', b'\x05')`, id, lit); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Erase exactly one of the four (NULL its vector), simulating a partial-subject erasure.
+	if _, err := admin.Exec(ctx,
+		`UPDATE agent_memory SET embedding = NULL WHERE subject_id = $1 AND ctid IN
+		 (SELECT ctid FROM agent_memory WHERE subject_id = $1 LIMIT 1)`, id); err != nil {
+		// ctid is not a CockroachDB column; fall back to NULLing by the lowest id.
+		if _, e2 := admin.Exec(ctx,
+			`UPDATE agent_memory SET embedding = NULL WHERE id = (SELECT id FROM agent_memory WHERE subject_id = $1 ORDER BY id LIMIT 1)`, id); e2 != nil {
+			t.Fatal(e2)
+		}
+	}
+
+	raw := make([]byte, 768*4)
+	binary.LittleEndian.PutUint32(raw, math.Float32bits(0.02))
+	for i := 1; i < 768; i++ {
+		binary.LittleEndian.PutUint32(raw[i*4:], math.Float32bits(0.02))
+	}
+	q := base64.StdEncoding.EncodeToString(raw)
+
+	res, err := svc.Search(ctx, id, q, 3)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	// Three live memories remain; k=3 must return all three, none dropped by the NULL row.
+	if len(res.Results) != 3 {
+		t.Fatalf("results = %d, want 3 live memories (the erased NULL row must not steal a slot)", len(res.Results))
+	}
+}
+
 func TestSearch_RejectsBadEmbedding(t *testing.T) {
 	st, _ := setup(t)
 	svc := demo.New(st, stubInverter{})

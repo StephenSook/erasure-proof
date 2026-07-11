@@ -357,6 +357,11 @@ type TimeTravelView struct {
 // AS OF SYSTEM TIME clause (which cannot take a placeholder) can never carry anything else.
 var ttTimestampRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?$`)
 
+// searchOverfetch is how many extra rows the similarity search reads beyond k so that NULL-distance
+// (erased) rows, which CockroachDB sorts first, cannot push live results past the limit under the
+// scan plan. Comfortably above any realistic per-subject memory count.
+const searchOverfetch = 64
+
 // TimeTravel runs the whole beat server-side: insert a throwaway row (fresh random subject, tiny
 // ciphertext placeholders, no key), capture the cluster's logical timestamp, DELETE the row like
 // an ordinary "erasure", then count what a normal read and an AS OF SYSTEM TIME read each see.
@@ -374,6 +379,15 @@ func (s *Service) TimeTravel(ctx context.Context) (TimeTravelView, error) {
 	if err != nil {
 		return TimeTravelView{}, fmt.Errorf("time-travel insert: %w", err)
 	}
+	// Best-effort cleanup: if anything between the insert and the intended DELETE errors, the
+	// throwaway row would otherwise leak permanently into subject_keys. The normal path DELETEs it
+	// as step three; this deferred delete is idempotent (a no-op once that ran) and uses a fresh
+	// context so it still fires if ctx was cancelled.
+	defer func() {
+		cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = s.operator.Exec(cctx, s.q.MustGet(qTTDelete), v.SubjectID)
+	}()
 	// The timestamp must postdate the insert's commit and predate the delete; a fresh statement
 	// on the same pool satisfies both.
 	var asOf string
@@ -427,19 +441,23 @@ func (s *Service) Search(ctx context.Context, subjectID, embeddingB64 string, k 
 	if k < 1 || k > 10 {
 		k = 3
 	}
+	// Over-fetch, then trim to k after dropping NULL-distance rows. CockroachDB sorts NULLs FIRST
+	// in ascending order (a documented divergence from Postgres NULLS LAST), so under the scan plan
+	// an erased subject's NULL-distance rows sort ahead of live rows and would consume top-k slots
+	// if we limited to k in SQL, silently dropping real results. The C-SPANN index plan never emits
+	// NULL rows, so this margin only guards the scan fallback; it is correct for any subject with
+	// fewer than searchOverfetch erased memories, which covers every realistic case (the demo has
+	// one memory per subject). A no-filter LIMIT keeps the query C-SPANN-eligible (a WHERE
+	// embedding IS NOT NULL would disqualify the index, per issue #146145).
+	fetchN := k + searchOverfetch
 	v := SearchView{Results: []SearchHit{}}
-	rows, err := s.operator.Query(ctx, s.q.MustGet(qSearchPrefix), subjectID, vec, k)
+	rows, err := s.operator.Query(ctx, s.q.MustGet(qSearchPrefix), subjectID, vec, fetchN)
 	if err != nil {
 		return SearchView{}, fmt.Errorf("vector search: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var h SearchHit
-		// The erasure NULLs the embedding but keeps the row, so `embedding <-> $2` is NULL for an
-		// erased subject. When the C-SPANN index serves the query those rows never appear; when the
-		// planner falls back to a scan (tiny tables), they do, with a NULL distance. Post-filter them
-		// out in app code, exactly as the C-SPANN non-prefix-filter guidance prescribes, so the
-		// "found before, nothing after" semantics hold under either plan.
 		var dist *float64
 		if err := rows.Scan(&h.MemoryID, &dist); err != nil {
 			return SearchView{}, fmt.Errorf("vector search scan: %w", err)
@@ -449,6 +467,9 @@ func (s *Service) Search(ctx context.Context, subjectID, embeddingB64 string, k 
 		}
 		h.Distance = *dist
 		v.Results = append(v.Results, h)
+		if len(v.Results) == k {
+			break // enough live results; the rest are farther or NULL
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return SearchView{}, fmt.Errorf("vector search rows: %w", err)
@@ -457,7 +478,7 @@ func (s *Service) Search(ctx context.Context, subjectID, embeddingB64 string, k 
 	// Ask the database how it planned the query and report ITS answer. EXPLAIN does not execute,
 	// so this is cheap; a plan that stopped using mem_idx (index disabled, stats change) shows up
 	// as index_used=false on the console instead of a silently false claim.
-	ex, err := s.operator.Query(ctx, "EXPLAIN "+s.q.MustGet(qSearchPrefix), subjectID, vec, k)
+	ex, err := s.operator.Query(ctx, "EXPLAIN "+s.q.MustGet(qSearchPrefix), subjectID, vec, fetchN)
 	if err != nil {
 		// The search itself succeeded; a failed EXPLAIN degrades to "not proven", never an error.
 		return v, nil
