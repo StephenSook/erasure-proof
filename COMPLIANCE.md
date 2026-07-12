@@ -61,7 +61,7 @@ How this project relates, stated precisely:
 
 Validator context: the erasure-gap quotes are from two independent experts, each attributed with
 their permission: Peter Borner in his role as interim chair of OPSF, and Debbie Reynolds ("The Data
-Diva"), a global data privacy and emerging-technologies expert.
+Diva"), Global Data Privacy and Emerging Technologies Expert.
 
 ## Honest limitations
 

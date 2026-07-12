@@ -202,8 +202,8 @@ project:
 > of collection. I also don't know of anyone that can then prove they erased the data fully and
 > correctly."
 
-A second independent expert reached the same conclusion. Debbie Reynolds, "The Data Diva," a
-global data privacy and emerging-technologies expert, told us:
+A second independent expert reached the same conclusion. Debbie Reynolds, "The Data Diva," Global
+Data Privacy and Emerging Technologies Expert, told us:
 
 > "Most organizations still struggle to fully demonstrate end-to-end data erasure. Many rely on
 > soft deletion, suppression, or retention schedules rather than immediate, irreversible deletion

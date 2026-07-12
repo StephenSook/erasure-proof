@@ -75,8 +75,8 @@ export function Trust() {
         claim PCT conformance (different signature model; the spec is a v0.1 draft).
       </p>
       <p className="muted">
-        A second independent expert, Debbie Reynolds, &quot;The Data Diva,&quot; a global data
-        privacy and emerging-technologies expert, named the exact failure mode this project defends
+        A second independent expert, Debbie Reynolds, &quot;The Data Diva,&quot; Global Data
+        Privacy and Emerging Technologies Expert, named the exact failure mode this project defends
         against: &quot;The bigger concern is not simply whether every copy is physically erased, but
         whether data that should have reached the end of its lifecycle is later exposed in a breach
         or inadvertently becomes active again.&quot; Quoted with permission. Crypto-shredding the
