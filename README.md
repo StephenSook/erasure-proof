@@ -209,6 +209,15 @@ Data Privacy and Emerging Technologies Expert, told us:
 > soft deletion, suppression, or retention schedules rather than immediate, irreversible deletion
 > across all systems."
 
+A third independent expert reached the same conclusion in public. Carey Lening, Privacat Insights,
+published "Why Provable Data Erasure Is Really Hard, Actually"
+([insights.priva.cat](https://insights.priva.cat/p/why-provable-data-erasure-is-really), July 2026),
+writing that "most organizations can't prove that data is for reals gone, and truly unrecoverable."
+She names the exact condition this project makes central: "even if you do something like key-based
+encryption for all files, you still need to prove that you have at least destroyed every copy of the
+key." That is precisely the NIST forward-secrecy condition this project states out loud, and
+destroying the per-subject key is what it does.
+
 This project answers both halves inside one database: the lawful basis is bound to every memory at
 write time in the hash-chained decision log, and every erasure emits a signed, externally anchored
 proof. (On the relationship to the emerging PCT standard, see

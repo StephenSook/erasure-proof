@@ -59,9 +59,11 @@ How this project relates, stated precisely:
   window. Expressing the erasure proof as a PCT extension claim is future work, not a shipped
   feature.
 
-Validator context: the erasure-gap quotes are from two independent experts, each attributed with
+Validator context: the erasure-gap quotes are from three independent experts. Two spoke to us with
 their permission: Peter Borner in his role as interim chair of OPSF, and Debbie Reynolds ("The Data
-Diva"), Global Data Privacy and Emerging Technologies Expert.
+Diva"), Global Data Privacy and Emerging Technologies Expert. The third, Carey Lening (Privacat
+Insights), reached the same conclusion in a public analysis, "Why Provable Data Erasure Is Really
+Hard, Actually" (https://insights.priva.cat/p/why-provable-data-erasure-is-really).
 
 ## Honest limitations
 

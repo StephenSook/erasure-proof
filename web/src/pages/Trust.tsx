@@ -83,6 +83,19 @@ export function Trust() {
         key (not soft-deleting the row) is what makes a re-exposed ciphertext unreadable, and the
         resurrection guard refuses to re-add an erased subject.
       </p>
+      <p className="muted">
+        A third expert reached the same conclusion in public: Carey Lening (Privacat Insights)
+        published{' '}
+        <a
+          href="https://insights.priva.cat/p/why-provable-data-erasure-is-really"
+          target="_blank"
+          rel="noreferrer noopener"
+        >
+          &quot;Why Provable Data Erasure Is Really Hard, Actually&quot;
+        </a>
+        , writing that key-based encryption still requires proving you &quot;destroyed every copy of
+        the key,&quot; which is the exact NIST forward-secrecy condition this project makes central.
+      </p>
 
       <h2>Conditions we state out loud</h2>
       <ul className="muted">
