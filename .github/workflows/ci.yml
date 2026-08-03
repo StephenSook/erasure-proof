@@ -38,6 +38,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+        with:
+          # Cache saving races across concurrent jobs on a shared lock and has failed otherwise
+          # green runs twice (post-run "Timeout (300s) waiting for lock on setup-uv-cache",
+          # exit 2, 2026-08-03). Deps here are light; determinism beats the cache.
+          enable-cache: false
       - name: Install
         run: |
           uv venv --python 3.12
@@ -57,6 +62,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+        with:
+          # Cache saving races across concurrent jobs on a shared lock and has failed otherwise
+          # green runs twice (post-run "Timeout (300s) waiting for lock on setup-uv-cache",
+          # exit 2, 2026-08-03). Deps here are light; determinism beats the cache.
+          enable-cache: false
       - name: Install
         run: |
           uv venv --python 3.12
@@ -158,6 +168,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+        with:
+          # Cache saving races across concurrent jobs on a shared lock and has failed otherwise
+          # green runs twice (post-run "Timeout (300s) waiting for lock on setup-uv-cache",
+          # exit 2, 2026-08-03). Deps here are light; determinism beats the cache.
+          enable-cache: false
       - name: Install
         run: |
           uv venv --python 3.12
@@ -276,6 +291,11 @@ jobs:
         with:
           go-version: stable
       - uses: astral-sh/setup-uv@v6
+        with:
+          # Cache saving races across concurrent jobs on a shared lock and has failed otherwise
+          # green runs twice (post-run "Timeout (300s) waiting for lock on setup-uv-cache",
+          # exit 2, 2026-08-03). Deps here are light; determinism beats the cache.
+          enable-cache: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
