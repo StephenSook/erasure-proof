@@ -27,6 +27,9 @@ export interface KnownSigner {
 }
 export const KNOWN_SIGNERS: KnownSigner[] = [
   { fingerprint: 'e170f6776956655c', label: 'erasure-proof demo signer' },
+  // KMS asymmetric ECC_NIST_P256 (alias/erasure-proof-proof-signing, us-east-1); fingerprint
+  // computed as sha256(SPKI PEM)[:16], cross-checked against a live anchored proof 2026-08-03.
+  { fingerprint: 'b6900739eb77672a', label: 'erasure-proof production signer (AWS KMS)' },
 ]
 
 // The downloaded proof file shape (web /proof "Download the signed proof").

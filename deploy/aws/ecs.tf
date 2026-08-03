@@ -74,6 +74,17 @@ resource "aws_ecs_task_definition" "core" {
         # the former SSM SecureString PEM secret (the /ecdsa-signing-key parameter can be deleted
         # at deploy; entrypoint-cryptod.sh tolerates its absence).
         { name = "KMS_SIGNING_KEY_ARN", value = aws_kms_key.proof_signing.arn },
+        { name = "S3_PROOF_RETAIN_DAYS", value = tostring(var.s3_retain_days) },
+        # The image bakes the recorded run at /app/spikes/...; inversion.py's repo-relative
+        # default path does not exist in the container's shallower tree, so pin it explicitly.
+        { name = "GOLDEN_RUN_PATH", value = "/app/spikes/spike1_vec2text/golden_run.json" },
+        # Live GPU inversion endpoints (Modal, scale-to-zero). Empty values keep cryptod's
+        # honest LiveInversionUnavailable fallback; the bearer secret rides in via SSM below.
+        { name = "MODAL_INVERT_URL", value = var.modal_invert_url },
+        { name = "MODAL_EMBED_URL", value = var.modal_embed_url },
+      ]
+      secrets = [
+        { name = "MODAL_INVERT_SECRET", valueFrom = "${var.ssm_prefix}/modal-invert-secret" },
       ]
       logConfiguration = {
         logDriver = "awslogs"
