@@ -38,6 +38,14 @@ jobs:
     runs-on: ubuntu-latest
     if: vars.KEEPALIVE_ENABLED == '1'
     steps:
+      - name: Guard against an enabled probe with no host configured
+        run: |
+          set -euo pipefail
+          if [ -z "${KEEPALIVE_HOST:-}" ]; then
+            echo "KEEPALIVE_ENABLED is 1 but the KEEPALIVE_HOST secret is empty" >&2
+            exit 1
+          fi
+
       - name: Probe /healthz (asserts db connectivity, keeps the Basic cluster warm)
         run: |
           set -euo pipefail
