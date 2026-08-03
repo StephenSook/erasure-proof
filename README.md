@@ -188,6 +188,20 @@ concurrent erasure the gapless hash chain holds with no lost or duplicated appen
 ([docs/concurrency.md](docs/concurrency.md)). (Details: [ARCHITECTURE.md](ARCHITECTURE.md),
 [SECURITY.md](SECURITY.md).)
 
+### Put the verifier on your phone
+
+The offline verifier installs on real devices; scan a code and check an erasure certificate with
+no server and no network.
+
+| Platform | Install | Scan |
+|---|---|---|
+| iOS (TestFlight) | [testflight.apple.com/join/Kxe3eKhQ](https://testflight.apple.com/join/Kxe3eKhQ) | <img src="docs/qr/testflight-ios.png" alt="iOS TestFlight QR" width="120"> |
+| Android (APK, direct) | [Release verifier-v1.0.0](https://github.com/StephenSook/erasure-proof/releases/tag/verifier-v1.0.0) | <img src="docs/qr/android-apk.png" alt="Android APK QR" width="120"> |
+
+The iOS build ships through TestFlight, so availability can lag Apple's beta review briefly
+after a new build; the Android APK is hosted as a GitHub Release asset so the link does not
+expire. Recognized signer fingerprints are listed in the release notes and shown in-app.
+
 ## Real-World Impact
 
 GDPR Article 17 compels erasure; EU AI Act Article 19(1) (effective Aug 2, 2026) compels retaining
