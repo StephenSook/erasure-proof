@@ -77,3 +77,25 @@ variable "bedrock_model_prefix" {
   type        = string
   default     = "us.anthropic."
 }
+
+variable "modal_invert_url" {
+  description = "Modal inversion endpoint URL (non-secret). Empty keeps the honest live-inversion-unavailable fallback."
+  type        = string
+  default     = ""
+}
+
+variable "modal_embed_url" {
+  description = "Modal GTR embed endpoint URL (non-secret). Empty keeps the honest fallback."
+  type        = string
+  default     = ""
+}
+
+variable "s3_retain_days" {
+  description = <<-EOT
+    Per-object Object Lock retention days cryptod stamps on anchored proofs. 1 for GOVERNANCE
+    rehearsals; ~50 for the judged COMPLIANCE bucket (covers judging through Sep 15 plus buffer;
+    COMPLIANCE retention is unremovable until it expires, so never set it long casually).
+  EOT
+  type        = number
+  default     = 1
+}
