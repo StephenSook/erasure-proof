@@ -7,7 +7,7 @@
 [![Go](https://img.shields.io/badge/Go-pgx%20%2B%20crdb%20retry-00ADD8.svg?logo=go&logoColor=white)](./services/api)
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB.svg?logo=python&logoColor=white)](./services/cryptod)
 [![React](https://img.shields.io/badge/React-19%20%2B%20Vite-61DAFB.svg?logo=react&logoColor=black)](./web)
-[![CockroachDB](https://img.shields.io/badge/CockroachDB-v25.4%20LTS-6933FF.svg?logo=cockroachlabs&logoColor=white)](https://www.cockroachlabs.com/)
+[![CockroachDB](https://img.shields.io/badge/CockroachDB-v26.2-6933FF.svg?logo=cockroachlabs&logoColor=white)](https://www.cockroachlabs.com/)
 [![AWS](https://img.shields.io/badge/AWS-KMS%20%C2%B7%20S3%20Object%20Lock%20%C2%B7%20Bedrock-232F3E.svg?logo=amazonaws&logoColor=white)](./deploy/aws)
 [![NIST SP 800-88r2](https://img.shields.io/badge/NIST-SP_800--88r2_crypto_erase-0b5394.svg)](https://csrc.nist.gov/pubs/sp/800/88/r2/final)
 
@@ -115,7 +115,8 @@ SECURITY, COMPLIANCE) stay at the root where GitHub surfaces them.
   search filters on the prefix column only (`db/queries/memory.sql`). Runs on the free Basic
   tier. We use L2 (Euclidean) `<->` distance; C-SPANN was a preview in v25.2 (L2-only), and the
   current stable docs (v26.2) no longer mark it preview and document L2, cosine, and inner-product.
-  Our cluster runs v25.4 LTS. (`db/migrations/0003_vector_index.sql`, spike 2 findings.)
+  Our cluster started on v25.4 LTS; the Basic tier auto-upgrades, and it runs v26.2.1 as of
+  2026-08-03 (verified via ccloud). (`db/migrations/0003_vector_index.sql`, spike 2 findings.)
 - **Managed MCP Server**: the independent verification path. A least-privilege service account
   reads the decision-log chain head through `cockroachlabs.cloud/mcp` (`select_query`), so a
   verifier does not have to trust our API layer, and every call is audit-logged by CockroachDB
