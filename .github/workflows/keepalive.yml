@@ -1,7 +1,13 @@
 # Keepalive + dead-man watch for the deployed demo (through judging, ~Sept 15).
 #
-# DORMANT until the repo variable KEEPALIVE_URL is set (done at the real deploy): every step
-# is skipped while it is empty, so this file can merge weeks before anything is live.
+# DORMANT until the repo variable KEEPALIVE_ENABLED is '1' (done at the real deploy): the job
+# is skipped until then, so this file can merge weeks before anything is live.
+#
+# The demo hostname is the SECRET KEEPALIVE_HOST (bare hostname, no scheme), not a variable:
+# this repo is public, so Actions logs are public, and the demo URL is judge-only per the
+# organizers. Secrets are exact-value masked in logs, and storing the bare hostname means even
+# curl's stderr ("Could not resolve host: <host>") gets masked; a full-URL secret would not
+# mask that substring.
 #
 # Design notes (learned the hard way on prior projects):
 #  * Offset minute list, NOT */10: GitHub deprioritizes */N and :00 schedules; a */10 cron has
@@ -25,17 +31,17 @@ permissions:
   contents: read
 
 env:
-  KEEPALIVE_URL: ${{ vars.KEEPALIVE_URL }}
+  KEEPALIVE_HOST: ${{ secrets.KEEPALIVE_HOST }}
 
 jobs:
   probe:
     runs-on: ubuntu-latest
-    if: vars.KEEPALIVE_URL != ''
+    if: vars.KEEPALIVE_ENABLED == '1'
     steps:
       - name: Probe /healthz (asserts db connectivity, keeps the Basic cluster warm)
         run: |
           set -euo pipefail
-          BODY=$(curl -sS -m 20 "$KEEPALIVE_URL/healthz")
+          BODY=$(curl -sS -m 20 "https://$KEEPALIVE_HOST/healthz")
           echo "$BODY"
           echo "$BODY" | python3 -c "
           import json, sys
@@ -47,7 +53,7 @@ jobs:
       - name: Probe the SPA shell
         run: |
           set -euo pipefail
-          curl -sS -m 20 "$KEEPALIVE_URL/" | grep -qi "<!doctype html" && echo "spa ok"
+          curl -sS -m 20 "https://$KEEPALIVE_HOST/" | grep -qi "<!doctype html" && echo "spa ok"
 
       - name: Dead-man ping (healthchecks.io, alerts when pings STOP)
         if: success()
