@@ -1,0 +1,12 @@
+{
+  "command": "ccloud cluster list --output json",
+  "captured_at": "2026-08-04",
+  "name": "erasure-proof",
+  "id": "afdd957d-aca2-4af0-9624-a3410c69eb25",
+  "cockroach_version": "v26.2.1",
+  "plan": "BASIC",
+  "cloud_provider": "AWS",
+  "regions": [
+    "us-east-1"
+  ]
+}

@@ -206,7 +206,7 @@ func TestErase_SurvivesInjectedRetries(t *testing.T) {
 // each hash linking to the previous). Under SERIALIZABLE, N concurrent appends racing for the same
 // next seq force 40001 retries that the crdbpgx wrapper absorbs; a gapless chain is proof the
 // serialization held. It logs real per-erasure latency percentiles for the concurrency findings
-// doc. N defaults to 50 (CI-safe under -race); set CONCURRENCY_N higher for a local capture.
+// doc. N defaults to 25 (the CI gate, safe under -race); set CONCURRENCY_N for a local capture.
 func TestErase_ConcurrentGaplessChainAtScale(t *testing.T) {
 	dsn := os.Getenv("CRDB_DSN_TEST")
 	if dsn == "" {

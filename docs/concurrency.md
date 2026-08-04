@@ -23,23 +23,25 @@ erasures took the same seq, and none was lost.
 
 ## Measured results
 
-Local, single-node CockroachDB `v25.2.20` (Docker, `--insecure`), operator pool sized to N+4 so the
-erasures genuinely run at once rather than queueing on the pool:
+Local, single-node CockroachDB `v25.2.3` (Docker, `--insecure`, the image this repo pins), operator
+pool sized to N+4 so the erasures genuinely run at once rather than queueing on the pool. Captured
+run: [`concurrency-transcript.txt`](concurrency-transcript.txt) (2026-08-04, Apple M3 host):
 
 | Concurrent erasures | Gapless chain 1..N | Wall clock | p50 | p95 | max | Notes |
 |---|---|---|---|---|---|---|
-| 25 (CI gate) | intact | ~0.4s | ~0.25s | ~0.4s | ~0.4s | reliable under `-race` on CI |
-| 50 | intact | 1.05s | 0.57s | 0.91s | 1.05s | reliable locally |
+| 25 (CI gate) | intact | 0.37s | 0.20s | 0.35s | 0.37s | reliable under `-race` on CI |
+| 50 | intact | 0.96s | 0.60s | 0.93s | 0.96s | reliable locally |
 | 100 | n/a | n/a | n/a | n/a | n/a | exceeded the retry budget, see below |
 
 Every erasure at 25 and 50 committed with a unique seq and the whole chain verified gapless and
 hash-intact. CI runs the N=25 case on every push (`go test -race`), so the invariant is checked
-continuously, not just claimed.
+continuously, not just claimed; the transcript above is one committed capture of the same test.
 
 ## The honest limit
 
 At 100 simultaneous single-node erasures, one transaction exhausted the `crdbpgx` default 50-retry
-budget and returned a `40001` (`WriteTooOldError` on the `seq` key). This is not a bug; it is the
+budget (`const defaultRetries = 50`, cockroach-go v2.4.3 `crdb/tx.go:244`) and returned a `40001`
+(`WriteTooOldError` on the `seq` key). This is not a bug; it is the
 expected behavior of a single hot key under extreme contention. The global gapless sequence trades
 write throughput for a strong, verifiable invariant, and that trade-off has a ceiling.
 

@@ -34,8 +34,8 @@ database that stores the memory in the first place.
 
 | Surface | Where |
 |---|---|
-| Web console | judge-facing deploy lands early August (single CloudFront URL); runs locally today, see [Setup and run](#setup-and-run) |
-| Read-only forensics MCP server | judge-connectable over HTTP at the deploy (`services/mcpserver`, four audit-logged tools) |
+| Web console | DEPLOYED: one CloudFront URL (provided to judges via the submission form), S3 + Fargate + KMS + S3 Object Lock behind it; also runs locally, see [Setup and run](#setup-and-run) |
+| Read-only forensics MCP server | four audit-logged tools over the official MCP SDK (`services/mcpserver`), CI-tested against a real CockroachDB; runs via stdio or streamable HTTP |
 | Offline mobile verifier | real now: Expo / React Native, pure-JS P-256, verifies an erasure certificate with no server and no network; Android APK via `eas build`, iOS via the simulator ([mobile/](mobile/)) |
 | Full stack, locally | runs today via [Setup and run](#setup-and-run) |
 
@@ -60,13 +60,14 @@ of truth and is mirrored on the app `/trust` page.
 | RFC 6962 Merkle transparency log, root signed into proofs | wired-live | `/api/tree-head`, `/api/inclusion`, browser verify |
 | Browser-side proof verification (`/proof/:id`) | wired-live | WebCrypto over the exact stored canonical bytes |
 | Row-level security scoping the agent per subject | wired-live | fail-closed; full matrix asserted in CI |
-| Read-only forensics MCP server (4 tools, audit-logged) | wired-live | plus Bedrock forensics agent over the same tools |
-| Managed MCP Server verification path | wired-live | `infra/ccloud/mcp-verify.sh`, live-proven |
-| ccloud service-account RBAC boundaries | wired-live | `infra/ccloud/rbac-demo.sh`: 403 vs MCP-authz vs 42501 |
+| Read-only forensics MCP server (4 tools, audit-logged) | wired-live | plus the live forensics agent (open-model or Bedrock) over the same tools |
+| Managed MCP Server verification path | integration | `infra/ccloud/mcp-verify.sh`: a spec-shaped MCP client run against the live cluster; CI gating is the next hardening step |
+| ccloud service-account RBAC boundaries | wired-live | `infra/ccloud/rbac-demo.sh`: control-plane 403 and data-plane 42501 execute live; the MCP-authz boundary is documented in the script header |
 | Atomic erasure surviving a node kill | integration | local 3-node rig (managed cloud nodes cannot be killed by us) |
 | Vec2Text name-then-noise inversion | integration | recorded golden run (Modal T4), reproducible; live InvalidTag is the proof |
 | REGIONAL BY ROW geo-domiciling | integration | optional migration, verified on a local 3-region cluster; NOT enabled on the single-region demo |
-| Deployed live demo app | integration | full-stack rehearsal deployed, smoked, and torn down 2026-07-10; judge-facing deploy lands early August |
+| Deployed live demo app | wired-live | judge-facing deploy live since 2026-08-03 (CloudFront + Fargate + KMS + COMPLIANCE Object Lock), keepalive-monitored through judging |
+| Live AI forensics agent + memory-writer | wired-live | open-model provider (llama.cpp on a Modal serverless GPU) behind the same interface as Bedrock; every on-screen verdict labels which provider answered; Bedrock becomes primary when its quota is granted |
 
 Tiers used: `wired-live` (runs on the real path today, verifiable from this repo), `integration`
 (built and tested, live by necessity elsewhere or landing at the scheduled deploy). No capability
@@ -115,8 +116,9 @@ SECURITY, COMPLIANCE) stay at the root where GitHub surfaces them.
   search filters on the prefix column only (`db/queries/memory.sql`). Runs on the free Basic
   tier. We use L2 (Euclidean) `<->` distance; C-SPANN was a preview in v25.2 (L2-only), and the
   current stable docs (v26.2) no longer mark it preview and document L2, cosine, and inner-product.
-  Our cluster started on v25.4 LTS; the Basic tier auto-upgrades, and it runs v26.2.1 as of
-  2026-08-03 (verified via ccloud). (`db/migrations/0003_vector_index.sql`, spike 2 findings.)
+  Our cluster started on v25.4 LTS; the Basic tier auto-upgrades, and it runs v26.2.1
+  (transcript: `infra/ccloud/cluster-version-2026-08-04.json`).
+  (`db/migrations/0003_vector_index.sql`, spike 2 findings.)
 - **Managed MCP Server**: the independent verification path. A least-privilege service account
   reads the decision-log chain head through `cockroachlabs.cloud/mcp` (`select_query`), so a
   verifier does not have to trust our API layer, and every call is audit-logged by CockroachDB

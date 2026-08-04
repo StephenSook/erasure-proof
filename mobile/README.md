@@ -58,7 +58,9 @@ eas build --platform android --profile preview   # yields an installable .apk
 Or a local debug build once the native project is generated (`npx expo prebuild`), via
 `cd android && ./gradlew assembleDebug` (APK under `android/app/build/outputs/apk/debug/`).
 
-## iOS (demo)
+## iOS
 
-Run in the iOS **simulator** (free, via Xcode) for the demo video. On-device install or TestFlight
-needs an Apple Developer account.
+Shipped through TestFlight: the public link is in the root README's "Put the verifier on your
+phone" section (external testing gates on Apple's beta review). The iOS **simulator** (free, via
+Xcode) also runs it for development. Store builds and submissions run through `eas build -p ios
+--profile production` and `eas submit` (the App Store Connect app id is pinned in `eas.json`).

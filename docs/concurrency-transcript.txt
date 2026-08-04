@@ -1,0 +1,14 @@
+== erasure concurrency transcript, captured 2026-08-04 ==
+== rig: cockroachdb/cockroach:v25.2.3 single node (docker, insecure), Apple M3 host; reproduce: docs/concurrency.md ==
+
+-- CONCURRENCY_N=25 (the CI gate) --
+    erasure_test.go:335: CONCURRENCY: 25 erasures, gapless hash chain 1..25 intact; wall=368ms p50=195ms p95=346ms max=368ms
+--- PASS: TestErase_ConcurrentGaplessChainAtScale (0.55s)
+PASS
+ok  	github.com/StephenSook/erasure-proof/services/api/internal/erasure	2.118s
+
+-- CONCURRENCY_N=50 --
+    erasure_test.go:335: CONCURRENCY: 50 erasures, gapless hash chain 1..50 intact; wall=964ms p50=603ms p95=927ms max=964ms
+--- PASS: TestErase_ConcurrentGaplessChainAtScale (1.22s)
+PASS
+ok  	github.com/StephenSook/erasure-proof/services/api/internal/erasure	1.463s

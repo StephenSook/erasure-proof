@@ -41,7 +41,8 @@ The demo sentence is Stephen's own public bio line (self-consented data, satisfi
 no-third-party-PII rule). It is a curated, in-distribution sentence, so near-verbatim recovery is
 expected. Do NOT conflate this with the uncurated 25.5% exact-name-recovery figure from Ghost
 Vectors (arXiv 2606.18497): curated in-distribution text reconstructs reliably; uncurated recovery
-is roughly 1-in-4. Both statements are true and both appear on the /trust page.
+is roughly 1-in-4. Both statements are true; this findings note is where the distinction lives
+(the /trust page covers the recorded-vs-live framing without the Ghost Vectors figure).
 
 The deployed app serves this as a labeled recorded golden run (see golden_run.json); the live
 `InvalidTag` decrypt failure is the actual cryptographic proof and runs live on every erasure.
