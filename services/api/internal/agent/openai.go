@@ -56,6 +56,26 @@ func NewOpenAIConverse() (*OpenAIConverse, error) {
 // Model reports the configured model label for honest on-screen provenance.
 func (o *OpenAIConverse) Model() string { return o.model }
 
+// Warm probes the endpoint's health; a scale-to-zero container also starts booting on this probe,
+// so the UI can begin warming while the judge is still reading the page. Bedrock providers have no
+// cold start and never implement this.
+func (o *OpenAIConverse) Warm(ctx context.Context) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, o.baseURL+"/health", nil)
+	if err != nil {
+		return false
+	}
+	if o.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+o.apiKey)
+	}
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	return resp.StatusCode == http.StatusOK
+}
+
 // The wire shapes of the OpenAI chat-completions dialect, reduced to the fields the loop uses.
 type oaTool struct {
 	Type     string     `json:"type"`

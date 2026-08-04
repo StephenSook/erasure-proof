@@ -3,6 +3,7 @@
 
 import {
   type AgentConfig,
+  type AgentWarm,
   ApiError,
   type ChainResult,
   type ConsistencyView,
@@ -77,6 +78,9 @@ export function createHttpClient(base = ''): DemoApi {
     },
     getAgentConfig() {
       return request<AgentConfig>(b, 'GET', '/api/agent/config')
+    },
+    agentWarm() {
+      return request<AgentWarm>(b, 'GET', '/api/agent/warm')
     },
     forensicsAudit(subjectId) {
       return request<ForensicsAudit>(b, 'POST', '/api/agent/forensics', { subject_id: subjectId })

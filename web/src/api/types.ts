@@ -138,12 +138,19 @@ export class ApiError extends Error {
   }
 }
 
-// AgentConfig tells the UI which live Bedrock agent features are wired.
+// AgentConfig tells the UI which live agent features are wired, and which provider answers.
 export interface AgentConfig {
   live_available: boolean
   forensics_available?: boolean
   memory_writer_available?: boolean
   titan_available?: boolean
+  provider?: string
+}
+
+// AgentWarm reports whether the live agent's model is ready; a scale-to-zero GPU container needs
+// roughly 30-60s from cold, and polling this endpoint both reports and kicks the warming.
+export interface AgentWarm {
+  warm: boolean
 }
 
 // TimeTravelView is the "deleted is not gone" beat, run entirely server-side against the live
@@ -222,6 +229,7 @@ export interface DemoApi {
   getInversionConfig(): Promise<InversionConfig>
   liveInversion(embeddingB64: string): Promise<LiveInversion>
   getAgentConfig(): Promise<AgentConfig>
+  agentWarm(): Promise<AgentWarm>
   forensicsAudit(subjectId: string): Promise<ForensicsAudit>
   writeMemory(turn: string): Promise<MemoryWriterResult>
   titanEmbed(text: string): Promise<TitanEmbedding>
