@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 )
 
 // The scripted endpoint returns a tool call first, then a final text verdict, asserting the exact
@@ -92,6 +93,38 @@ func TestOpenAIConverseToolLoopTranslation(t *testing.T) {
 	}
 }
 
+// A 503 "Loading model" during a scale-to-zero cold start is a warming signal: the client retries
+// within the context deadline instead of failing the audit on the first judge click.
+func TestOpenAIConverseRetriesWhileWarming(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		if calls == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":{"message":"Loading model","type":"unavailable_error","code":503}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"warm now"}}]}`))
+	}))
+	defer srv.Close()
+	t.Setenv("AGENTS_LLM_URL", srv.URL)
+	t.Setenv("AGENTS_LLM_SECRET", "")
+	c, err := NewOpenAIConverse()
+	if err != nil {
+		t.Fatalf("NewOpenAIConverse: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	res, err := c.Converse(ctx, "s", []Message{{Role: RoleUser, Blocks: []Block{{Text: "go"}}}}, nil)
+	if err != nil {
+		t.Fatalf("converse: %v", err)
+	}
+	if res.Text != "warm now" || calls != 2 {
+		t.Fatalf("text=%q calls=%d, want warm retry", res.Text, calls)
+	}
+}
+
 // llama.cpp has been observed emitting raw control characters inside JSON strings, which Go's
 // strict decoder rejects; the sanitizer escapes them in-string and leaves structural whitespace
 // alone.
@@ -135,6 +168,8 @@ func TestOpenAIConverseEdgeCases(t *testing.T) {
 		t.Fatal("empty tool-call id was not replaced with a local id")
 	}
 
+	// A permanently-503 endpoint must surface as an error once the caller's deadline expires,
+	// not spin forever (warming retries are deadline-bounded).
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte(`loading model`))
@@ -142,8 +177,10 @@ func TestOpenAIConverseEdgeCases(t *testing.T) {
 	defer bad.Close()
 	t.Setenv("AGENTS_LLM_URL", bad.URL)
 	c2, _ := NewOpenAIConverse()
-	if _, err := c2.Converse(context.Background(), "s", nil, nil); err == nil {
-		t.Fatal("expected an error from a non-200 response")
+	shortCtx, shortCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer shortCancel()
+	if _, err := c2.Converse(shortCtx, "s", nil, nil); err == nil {
+		t.Fatal("expected an error from a permanently-503 endpoint at deadline")
 	}
 	_ = os.Unsetenv("AGENTS_LLM_URL")
 }

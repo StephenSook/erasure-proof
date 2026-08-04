@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 )
 
 // OpenAIConverse is a Converser over an OpenAI-compatible chat-completions endpoint. It exists so
@@ -130,17 +131,41 @@ func (o *OpenAIConverse) Converse(
 	if o.apiKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+o.apiKey)
 	}
-	resp, err := o.httpClient.Do(httpReq)
-	if err != nil {
-		return Result{}, fmt.Errorf("open-model endpoint: %w", err)
-	}
-	defer resp.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return Result{}, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return Result{}, fmt.Errorf("open-model endpoint: status %d: %s", resp.StatusCode, truncate(respBody, 300))
+	// A scale-to-zero endpoint answers 503 while the container boots and the model loads
+	// (observed live: {"message":"Loading model"}). That is a warming signal, not a failure, so
+	// retry within the caller's deadline; the first judge click pays the cold start and every
+	// later call is warm.
+	var respBody []byte
+	for {
+		resp, err := o.httpClient.Do(httpReq)
+		if err != nil {
+			return Result{}, fmt.Errorf("open-model endpoint: %w", err)
+		}
+		respBody, err = io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		if err != nil {
+			return Result{}, err
+		}
+		if resp.StatusCode == http.StatusServiceUnavailable {
+			select {
+			case <-ctx.Done():
+				return Result{}, fmt.Errorf("open-model endpoint: still warming at deadline: %s", truncate(respBody, 120))
+			case <-time.After(5 * time.Second):
+			}
+			httpReq, err = http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+"/v1/chat/completions", bytes.NewReader(body))
+			if err != nil {
+				return Result{}, err
+			}
+			httpReq.Header.Set("Content-Type", "application/json")
+			if o.apiKey != "" {
+				httpReq.Header.Set("Authorization", "Bearer "+o.apiKey)
+			}
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			return Result{}, fmt.Errorf("open-model endpoint: status %d: %s", resp.StatusCode, truncate(respBody, 300))
+		}
+		break
 	}
 	var parsed oaResponse
 	if err := json.Unmarshal(sanitizeJSONControlChars(respBody), &parsed); err != nil {
