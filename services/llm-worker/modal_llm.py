@@ -37,7 +37,12 @@ PORT = 8000
 image = (
     modal.Image.from_registry("ghcr.io/ggml-org/llama.cpp:server-cuda", add_python="3.11")
     .entrypoint([])  # the image's default entrypoint would start the server before Modal does
-    .run_commands(f"mkdir -p /models && curl -fsSL -o {MODEL_PATH} '{MODEL_URL}'")
+    # -f fails on HTTP errors; the size floor catches a truncated or substituted download at
+    # build time instead of an opaque load failure at first cold start.
+    .run_commands(
+        f"mkdir -p /models && curl -fsSL -o {MODEL_PATH} '{MODEL_URL}' && "
+        f"test $(stat -c %s {MODEL_PATH}) -gt 1500000000"
+    )
 )
 
 app = modal.App("erasure-proof-llm")
@@ -55,8 +60,13 @@ app = modal.App("erasure-proof-llm")
 @modal.web_server(port=PORT, startup_timeout=180)
 def serve() -> None:
     import os
+    import threading
 
-    subprocess.Popen(
+    # The key rides in the environment (llama.cpp's LLAMA_ARG_API_KEY), not on argv, so it never
+    # shows in /proc or process listings inside the container.
+    env = dict(os.environ)
+    env["LLAMA_ARG_API_KEY"] = os.environ["LLM_API_KEY"]
+    proc = subprocess.Popen(
         [
             "/app/llama-server",
             "--model", MODEL_PATH,
@@ -65,6 +75,14 @@ def serve() -> None:
             "--jinja",              # the model's chat template drives OpenAI-style tool calls
             "-ngl", "99",           # all layers on the GPU
             "--ctx-size", "8192",
-            "--api-key", os.environ["LLM_API_KEY"],
-        ]
+        ],
+        env=env,
     )
+
+    # If llama-server dies, kill the container instead of serving 502s until scaledown; Modal then
+    # cold-starts a fresh one on the next request.
+    def watchdog() -> None:
+        proc.wait()
+        os._exit(1)
+
+    threading.Thread(target=watchdog, daemon=True).start()

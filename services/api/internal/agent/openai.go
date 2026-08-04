@@ -33,6 +33,12 @@ func NewOpenAIConverse() (*OpenAIConverse, error) {
 	if base == "" {
 		return nil, fmt.Errorf("AGENTS_LLM_URL is not set")
 	}
+	// The bearer secret rides on every request, so refuse to send it anywhere unencrypted;
+	// loopback is exempt for local development and tests.
+	if !strings.HasPrefix(base, "https://") &&
+		!strings.HasPrefix(base, "http://127.0.0.1") && !strings.HasPrefix(base, "http://localhost") {
+		return nil, fmt.Errorf("AGENTS_LLM_URL must be https (loopback excepted)")
+	}
 	model := os.Getenv("AGENTS_LLM_MODEL")
 	if model == "" {
 		model = "qwen2.5-3b-instruct"
@@ -238,7 +244,23 @@ func sanitizeJSONControlChars(b []byte) []byte {
 		if inString {
 			switch {
 			case escaped:
+				// A raw control byte right after a backslash is still invalid JSON; emitting its
+				// escape sequence after the already-written backslash yields a valid literal
+				// backslash + escape (the only lossless-ish repair available).
 				escaped = false
+				if c < 0x20 {
+					switch c {
+					case '\n':
+						out.WriteString(`\n`)
+					case '\r':
+						out.WriteString(`\r`)
+					case '\t':
+						out.WriteString(`\t`)
+					default:
+						fmt.Fprintf(&out, `\u%04x`, c)
+					}
+					continue
+				}
 			case c == '\\':
 				escaped = true
 			case c == '"':
