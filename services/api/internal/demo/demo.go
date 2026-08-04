@@ -98,6 +98,11 @@ type Service struct {
 	// when Bedrock is not wired. It shares the agent semaphore and rolling-hour budget: one
 	// account-level Bedrock quota, one guard.
 	titanEmbedder agent.TitanEmbedder
+	// liveInvJob is the single background live-inversion job (see StartLiveInversion): the GPU run
+	// outlasts CloudFront's 60s origin ceiling, so the browser starts it and polls, never holding
+	// one long response open.
+	liveInvJobMu sync.Mutex
+	liveInvJob   LiveInversionJob
 }
 
 // New builds the demo Service.
@@ -777,6 +782,58 @@ func (s *Service) InversionLive(ctx context.Context, embeddingB64 string) (map[s
 		return nil, ErrLiveInversionBudget
 	}
 	return s.inverter.InvertLive(ctx, embeddingB64)
+}
+
+// LiveInversionJob is the poll-visible state of the background live inversion. A live GPU run is
+// 1 to 2.5 minutes (cold start plus the inversion), longer than CloudFront's 60s origin read
+// ceiling, so a synchronous response 504s at the edge before the origin answers. The browser
+// starts the job and polls short status requests instead.
+type LiveInversionJob struct {
+	State  string         `json:"state"` // idle | running | done | error
+	Result map[string]any `json:"result,omitempty"`
+	Error  string         `json:"error,omitempty"`
+}
+
+// StartLiveInversion begins one background live inversion, single-flight: a second start while one
+// is running reports the running job instead of billing another GPU container. Payload validation
+// happens here so the START request carries the error, not a later poll.
+func (s *Service) StartLiveInversion(embeddingB64 string) LiveInversionJob {
+	if raw, err := base64.StdEncoding.DecodeString(embeddingB64); err != nil || len(raw) != 768*4 {
+		return LiveInversionJob{State: "error", Error: "embedding must be 3072 bytes (768 float32) of base64"}
+	}
+	s.liveInvJobMu.Lock()
+	defer s.liveInvJobMu.Unlock()
+	if s.liveInvJob.State == "running" {
+		return s.liveInvJob
+	}
+	s.liveInvJob = LiveInversionJob{State: "running"}
+	go func() {
+		// Same deadline layering as the sync path: Modal worker 300s < cryptod 320s/330s < 340s.
+		ctx, cancel := context.WithTimeout(context.Background(), 340*time.Second)
+		defer cancel()
+		v, err := s.InversionLive(ctx, embeddingB64)
+		s.liveInvJobMu.Lock()
+		defer s.liveInvJobMu.Unlock()
+		switch {
+		case errors.Is(err, ErrLiveInversionBusy):
+			s.liveInvJob = LiveInversionJob{State: "error", Error: "the GPU is busy with another live inversion; try again in a moment"}
+		case errors.Is(err, ErrLiveInversionBudget):
+			s.liveInvJob = LiveInversionJob{State: "error", Error: "the live-inversion hourly budget is used up; the recorded run is always available"}
+		case err != nil:
+			log.Printf("demo: live inversion failed: %v", err)
+			s.liveInvJob = LiveInversionJob{State: "error", Error: "live inversion unavailable"}
+		default:
+			s.liveInvJob = LiveInversionJob{State: "done", Result: v}
+		}
+	}()
+	return s.liveInvJob
+}
+
+// LiveInversionStatus reports the current job for the polling endpoint.
+func (s *Service) LiveInversionStatus() LiveInversionJob {
+	s.liveInvJobMu.Lock()
+	defer s.liveInvJobMu.Unlock()
+	return s.liveInvJob
 }
 
 // TreeHead is the RFC 6962 Merkle head over the decision log.
