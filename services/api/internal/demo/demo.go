@@ -100,9 +100,12 @@ type Service struct {
 	titanEmbedder agent.TitanEmbedder
 	// liveInvJob is the single background live-inversion job (see StartLiveInversion): the GPU run
 	// outlasts CloudFront's 60s origin ceiling, so the browser starts it and polls, never holding
-	// one long response open.
-	liveInvJobMu sync.Mutex
-	liveInvJob   LiveInversionJob
+	// one long response open. liveInvJobInput binds the job to the exact embedding it inverts, so
+	// a start for a DIFFERENT embedding is refused busy rather than silently served someone else's
+	// result.
+	liveInvJobMu    sync.Mutex
+	liveInvJob      LiveInversionJob
+	liveInvJobInput string
 }
 
 // New builds the demo Service.
@@ -794,19 +797,25 @@ type LiveInversionJob struct {
 	Error  string         `json:"error,omitempty"`
 }
 
-// StartLiveInversion begins one background live inversion, single-flight: a second start while one
-// is running reports the running job instead of billing another GPU container. Payload validation
-// happens here so the START request carries the error, not a later poll.
-func (s *Service) StartLiveInversion(embeddingB64 string) LiveInversionJob {
+// StartLiveInversion begins one background live inversion. Single-flight PER EMBEDDING: a second
+// start for the same embedding coalesces onto the running job, while a start for a different
+// embedding is refused with ErrLiveInversionBusy (the old sync path's semantics) so one subject's
+// poll can never be answered with another subject's inversion. Payload validation happens here so
+// the START request carries the error, not a later poll.
+func (s *Service) StartLiveInversion(embeddingB64 string) (LiveInversionJob, error) {
 	if raw, err := base64.StdEncoding.DecodeString(embeddingB64); err != nil || len(raw) != 768*4 {
-		return LiveInversionJob{State: "error", Error: "embedding must be 3072 bytes (768 float32) of base64"}
+		return LiveInversionJob{}, fmt.Errorf("embedding must be 3072 bytes (768 float32) of base64")
 	}
 	s.liveInvJobMu.Lock()
 	defer s.liveInvJobMu.Unlock()
 	if s.liveInvJob.State == "running" {
-		return s.liveInvJob
+		if s.liveInvJobInput == embeddingB64 {
+			return s.liveInvJob, nil
+		}
+		return LiveInversionJob{}, ErrLiveInversionBusy
 	}
 	s.liveInvJob = LiveInversionJob{State: "running"}
+	s.liveInvJobInput = embeddingB64
 	go func() {
 		// Same deadline layering as the sync path: Modal worker 300s < cryptod 320s/330s < 340s.
 		ctx, cancel := context.WithTimeout(context.Background(), 340*time.Second)
@@ -826,7 +835,7 @@ func (s *Service) StartLiveInversion(embeddingB64 string) LiveInversionJob {
 			s.liveInvJob = LiveInversionJob{State: "done", Result: v}
 		}
 	}()
-	return s.liveInvJob
+	return s.liveInvJob, nil
 }
 
 // LiveInversionStatus reports the current job for the polling endpoint.

@@ -676,19 +676,23 @@ func TestLiveInversionJob_StartPollsToDone_SingleFlight(t *testing.T) {
 	svc := demo.New(&store.Store{}, stubInverter{entered: entered, liveWait: release})
 
 	// A bad payload errors at start time (the START request carries it, never a poll).
-	if job := svc.StartLiveInversion("not-base64!"); job.State != "error" {
-		t.Fatalf("bad payload: want error state, got %+v", job)
+	if _, err := svc.StartLiveInversion("not-base64!"); err == nil {
+		t.Fatal("bad payload: want a validation error")
 	}
 
 	emb := base64.StdEncoding.EncodeToString(bytesRepeat(0x33, 3072))
-	if job := svc.StartLiveInversion(emb); job.State != "running" {
-		t.Fatalf("start: want running, got %+v", job)
+	if job, err := svc.StartLiveInversion(emb); err != nil || job.State != "running" {
+		t.Fatalf("start: want running, got %+v err %v", job, err)
 	}
 	<-entered // the background run is now holding its GPU slot
-	// A second start while one runs is single-flight: it reports the running job and does not
-	// bill a second GPU container.
-	if job := svc.StartLiveInversion(emb); job.State != "running" {
-		t.Fatalf("second start: want running, got %+v", job)
+	// A second start for the SAME embedding coalesces onto the running job (no second GPU bill).
+	if job, err := svc.StartLiveInversion(emb); err != nil || job.State != "running" {
+		t.Fatalf("second start: want running, got %+v err %v", job, err)
+	}
+	// A start for a DIFFERENT embedding is refused busy, never served the other subject's result.
+	other := base64.StdEncoding.EncodeToString(bytesRepeat(0x44, 3072))
+	if _, err := svc.StartLiveInversion(other); !errors.Is(err, demo.ErrLiveInversionBusy) {
+		t.Fatalf("different embedding mid-run: want ErrLiveInversionBusy, got %v", err)
 	}
 	if job := svc.LiveInversionStatus(); job.State != "running" {
 		t.Fatalf("status mid-run: want running, got %+v", job)
