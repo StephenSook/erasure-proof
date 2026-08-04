@@ -61,3 +61,14 @@ def test_allows_forbidden_words_and_semicolons_inside_literals_and_comments(q):
 def test_still_rejects_real_mutations_even_with_literals(q):
     with pytest.raises(ValueError):
         assert_single_select(q)
+
+
+def test_subject_keys_denied_via_free_form_sql() -> None:
+    import pytest
+
+    from forensics_mcp import sqlguard
+
+    with pytest.raises(ValueError, match="subject_keys"):
+        sqlguard.assert_single_select("SELECT wrapped_key FROM subject_keys")
+    # The word inside a string literal is data, not an identifier, and stays allowed.
+    sqlguard.assert_single_select("SELECT 1 WHERE 'subject_keys' = 'subject_keys'")

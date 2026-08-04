@@ -2,7 +2,13 @@
 
 Run over stdio (the default) for local clients, or streamable HTTP for a deployed endpoint:
     python -m forensics_mcp.server            # stdio
-    MCP_TRANSPORT=streamable-http python -m forensics_mcp.server
+    MCP_TRANSPORT=streamable-http MCP_BEARER=<token> python -m forensics_mcp.server
+
+The HTTP transport REQUIRES a bearer token (MCP_BEARER) and refuses to start without one:
+`run_readonly_sql` can read live rows (including not-yet-erased embeddings), which is exactly the
+data class this project protects, so the deployed endpoint is judge-token-gated even though the
+role is SELECT-only and every call is audit-logged. stdio keeps no token (a local client already
+holds the DSN).
 """
 
 from __future__ import annotations
@@ -10,10 +16,20 @@ from __future__ import annotations
 import os
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from . import audit, db, tools
 
-mcp = FastMCP("erasure-proof-forensics")
+# The SDK's DNS-rebinding guard rejects Host headers it does not know. Behind CloudFront + an ALB
+# the Host is the public distribution domain, so the deploy sets MCP_ALLOWED_HOSTS (comma
+# separated); localhost stays allowed for local clients and tests.
+_allowed_hosts = ["localhost", "127.0.0.1", "testserver"] + [
+    h.strip() for h in os.getenv("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()
+]
+mcp = FastMCP(
+    "erasure-proof-forensics",
+    transport_security=TransportSecuritySettings(allowed_hosts=_allowed_hosts),
+)
 
 
 @mcp.tool()
@@ -48,8 +64,52 @@ def confirm_key_destroyed(subject_id: str) -> dict:
         return tools.confirm_key_destroyed(conn, subject_id)
 
 
+def _bearer_wrapped_app():
+    """The streamable-HTTP ASGI app behind a constant-time bearer check.
+
+    401s carry no body detail; the health probe path (`/mcp/health`) is exempt so a load
+    balancer can see liveness without holding the judge token.
+    """
+    import hmac
+
+    token = os.environ["MCP_BEARER"]
+    inner = mcp.streamable_http_app()
+
+    async def app(scope, receive, send):
+        if scope["type"] == "http" and scope.get("path", "").rstrip("/") == "/mcp/health":
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"ok"})
+            return
+        if scope["type"] == "http":
+            headers = {
+                k.decode("latin-1").lower(): v.decode("latin-1")
+                for k, v in scope.get("headers", [])
+            }
+            supplied = headers.get("authorization", "")
+            if not hmac.compare_digest(supplied, f"Bearer {token}"):
+                await send({"type": "http.response.start", "status": 401, "headers": []})
+                await send({"type": "http.response.body", "body": b"unauthorized"})
+                return
+        await inner(scope, receive, send)
+
+    return app
+
+
 def main() -> None:
     transport = os.getenv("MCP_TRANSPORT", "stdio")
+    if transport == "streamable-http":
+        # Fail closed: no token, no public SQL surface.
+        if not os.getenv("MCP_BEARER"):
+            raise SystemExit("MCP_BEARER is required for the streamable-http transport")
+        import uvicorn
+
+        uvicorn.run(
+            _bearer_wrapped_app(),
+            host=mcp.settings.host,
+            port=mcp.settings.port,
+            log_level="info",
+        )
+        return
     mcp.run(transport=transport)  # type: ignore[arg-type]
 
 

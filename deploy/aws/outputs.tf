@@ -16,6 +16,10 @@ output "ecr_cryptod" {
   value = aws_ecr_repository.cryptod.repository_url
 }
 
+output "ecr_mcpserver" {
+  value = aws_ecr_repository.mcpserver.repository_url
+}
+
 output "web_bucket" {
   description = "aws s3 sync web/dist/ s3://<this>/ then invalidate CloudFront."
   value       = aws_s3_bucket.web.bucket

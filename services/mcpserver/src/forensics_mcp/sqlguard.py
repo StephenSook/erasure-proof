@@ -75,4 +75,11 @@ def assert_single_select(query: str) -> str:
         raise ValueError("only SELECT, WITH, SHOW, EXPLAIN, TABLE, or VALUES is allowed")
     if _FORBIDDEN.search(low):
         raise ValueError("statement contains a forbidden data-modifying or DDL keyword")
+    # subject_keys holds the wrapped key material, the crown jewels of the crypto-shred. The
+    # free-form tool never reads it, even under the judge bearer; the purpose-built
+    # confirm_key_destroyed tool answers the only forensic question that table has.
+    if re.search(r"\bsubject_keys\b", low):
+        raise ValueError(
+            "subject_keys is not readable through run_readonly_sql; use confirm_key_destroyed"
+        )
     return q

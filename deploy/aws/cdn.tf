@@ -97,9 +97,11 @@ resource "aws_cloudfront_distribution" "main" {
     origin_request_policy_id = local.fwd_all_viewer_nohost
   }
 
-  # The api also serves /memories, /erase, /healthz at the root path space.
+  # The api also serves /memories, /erase, /healthz at the root path space; /mcp* reaches the
+  # forensics MCP server container (judge bearer checked in-process; Authorization and
+  # mcp-session-id forward because the origin request policy passes all viewer headers but Host).
   dynamic "ordered_cache_behavior" {
-    for_each = ["/memories*", "/erase*", "/healthz*"]
+    for_each = ["/memories*", "/erase*", "/healthz*", "/mcp*"]
     content {
       path_pattern             = ordered_cache_behavior.value
       target_origin_id         = "api"
