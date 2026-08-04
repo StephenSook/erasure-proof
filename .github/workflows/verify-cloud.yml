@@ -1,0 +1,59 @@
+# Nightly verification of the CLOUD-side claims, run where a PR gate cannot honestly live:
+# both jobs depend on external services (cockroachlabs.cloud), so gating every PR on them would
+# trade real signal for external-availability flakes. Nightly + dispatch + main pushes touching
+# the scripts keeps them CI-run gates without poisoning PR CI.
+#
+# Job 1 proves the Managed MCP Server path: the full streamable-HTTP handshake and a select_query
+# reading the decision-log chain head through cockroachlabs.cloud/mcp, authenticated as the
+# least-privilege service account. Job 2 proves two RBAC boundaries live: the control-plane
+# 200-vs-403 split on one key, and the data-plane 42501 append-only denial from the database
+# itself. Offset cron minute per scheduler-throttling guidance; a failed run emails the owner.
+
+name: verify-cloud
+
+on:
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - "infra/ccloud/**"
+      - ".github/workflows/verify-cloud.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  managed-mcp:
+    runs-on: ubuntu-latest
+    if: github.repository == 'StephenSook/erasure-proof'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Chain head through cockroachlabs.cloud/mcp
+        env:
+          CCLOUD_SA_API_KEY: ${{ secrets.CCLOUD_SA_API_KEY }}
+        run: |
+          set -euo pipefail
+          bash infra/ccloud/mcp-verify.sh | tee /tmp/mcp-verify.out
+          grep -q "PASS: chain head read through cockroachlabs.cloud/mcp" /tmp/mcp-verify.out
+
+  rbac-boundaries:
+    runs-on: ubuntu-latest
+    if: github.repository == 'StephenSook/erasure-proof'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cockroach binary (data-plane boundary needs the SQL client)
+        run: |
+          set -euo pipefail
+          curl -fsSL https://binaries.cockroachdb.com/cockroach-v25.2.3.linux-amd64.tgz | tar xz
+          sudo cp cockroach-v25.2.3.linux-amd64/cockroach /usr/local/bin/
+      - name: Control-plane 200-vs-403 and data-plane 42501
+        env:
+          CCLOUD_SA_API_KEY: ${{ secrets.CCLOUD_SA_API_KEY }}
+          CRDB_DSN_AGENT_WORKER: ${{ secrets.CRDB_DSN_AGENT_WORKER }}
+        run: |
+          set -euo pipefail
+          bash infra/ccloud/rbac-demo.sh | tee /tmp/rbac.out
+          grep -q "PASS: same key, 200 on its scoped cluster" /tmp/rbac.out
+          grep -q "PASS: SQLSTATE 42501" /tmp/rbac.out
