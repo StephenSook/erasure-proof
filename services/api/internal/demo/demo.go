@@ -87,10 +87,12 @@ type Service struct {
 	// forensicsConverser is the Bedrock client for the on-screen forensics agent; nil when Bedrock
 	// is not wired, so the UI shows the recorded/mock verdict instead. forensicsSem serializes live
 	// audits (one at a time) since Bedrock's new-account token quota is low.
-	forensicsConverser agent.Converser
-	forensicsSem       chan struct{}
-	forensicsMu        sync.Mutex
-	forensicsHits      []time.Time
+	forensicsConverser  agent.Converser
+	forensicsSource     string
+	forensicsDisclosure string
+	forensicsSem        chan struct{}
+	forensicsMu         sync.Mutex
+	forensicsHits       []time.Time
 	// titanEmbedder is the live AWS-native (Titan v2) embedding for the side-by-side panel; nil
 	// when Bedrock is not wired. It shares the agent semaphore and rolling-hour budget: one
 	// account-level Bedrock quota, one guard.
@@ -108,6 +110,24 @@ func New(s *store.Store, inverter Inverter) *Service {
 		now:           time.Now,
 		forensicsSem:  make(chan struct{}, 1),
 	}
+}
+
+// SetForensicsProvenance overrides the Source/Disclosure stamped on live agent results, so a
+// non-Bedrock provider (the open-model fallback) is labeled honestly on screen. Unset keeps the
+// Bedrock strings.
+func (s *Service) SetForensicsProvenance(source, disclosure string) {
+	s.forensicsSource, s.forensicsDisclosure = source, disclosure
+}
+
+// ForensicsProvider reports the provenance label for the config endpoint ("" when unwired).
+func (s *Service) ForensicsProvider() string {
+	if s.forensicsConverser == nil {
+		return ""
+	}
+	if s.forensicsSource != "" {
+		return s.forensicsSource
+	}
+	return "live_bedrock"
 }
 
 // SetForensicsConverser wires the live Bedrock forensics agent. Called at boot only when Bedrock is
@@ -188,6 +208,9 @@ func (s *Service) ForensicsAudit(ctx context.Context, subjectID string) (agent.A
 	res.Source = "live_bedrock"
 	res.Disclosure = "Live Claude (Bedrock) tool-use audit. The verdict cites only what the " +
 		"read-only tools returned; evidence_proven is our own check of the trace."
+	if s.forensicsSource != "" {
+		res.Source, res.Disclosure = s.forensicsSource, s.forensicsDisclosure
+	}
 	return res, nil
 }
 

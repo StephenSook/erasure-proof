@@ -505,6 +505,7 @@ func (s *Server) handleAgentConfig(w http.ResponseWriter, r *http.Request) {
 		"forensics_available":     forensics,
 		"memory_writer_available": memWriter,
 		"titan_available":         s.demo.TitanAvailable(),
+		"provider":                s.demo.ForensicsProvider(),
 	})
 }
 

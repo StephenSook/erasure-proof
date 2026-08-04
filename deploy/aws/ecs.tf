@@ -40,10 +40,15 @@ resource "aws_ecs_task_definition" "core" {
         { name = "API_PORT", value = "8080" },
         { name = "CRYPTOD_URL", value = "http://localhost:8081" },
         { name = "QUERIES_DIR", value = "/db/queries" },
+        # Live agent beats. The open-model fallback (llama.cpp on Modal) serves them while the
+        # Bedrock quota is zero; empty URL keeps the honest recorded fallback.
+        { name = "AGENTS_LLM_URL", value = var.agents_llm_url },
+        { name = "AGENTS_LLM_MODEL", value = var.agents_llm_model },
       ]
       secrets = [
         { name = "CRDB_DSN_OPERATOR", valueFrom = "${var.ssm_prefix}/crdb-dsn-operator" },
         { name = "CRDB_DSN_AGENT_WORKER", valueFrom = "${var.ssm_prefix}/crdb-dsn-agent" },
+        { name = "AGENTS_LLM_SECRET", valueFrom = "${var.ssm_prefix}/agents-llm-secret" },
       ]
       logConfiguration = {
         logDriver = "awslogs"
