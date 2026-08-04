@@ -20,4 +20,7 @@ def connect() -> psycopg.Connection:
     """
     conn = psycopg.connect(dsn(), autocommit=True)
     conn.execute("SET default_transaction_read_only = on")
+    # A public (bearer-gated) endpoint must not let one expensive SELECT camp on the database;
+    # 10s is generous for every forensic query and caps resource-exhaustion abuse.
+    conn.execute("SET statement_timeout = '10s'")
     return conn

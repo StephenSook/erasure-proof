@@ -117,8 +117,10 @@ resource "aws_ecs_task_definition" "core" {
         { name = "MCP_TRANSPORT", value = "streamable-http" },
         { name = "FASTMCP_HOST", value = "0.0.0.0" },
         { name = "FASTMCP_PORT", value = "8082" },
-        # The DNS-rebinding guard must know the public Host header CloudFront presents.
-        { name = "MCP_ALLOWED_HOSTS", value = aws_cloudfront_distribution.main.domain_name },
+        # The DNS-rebinding guard must know the Host the ORIGIN receives: CloudFront's
+        # no-viewer-Host origin policy makes that the ALB DNS name, not the public domain
+        # (adversarial review catch). Both are allowed so a future Host-forwarding change works.
+        { name = "MCP_ALLOWED_HOSTS", value = "${aws_lb.api.dns_name},${aws_cloudfront_distribution.main.domain_name}" },
       ]
       secrets = [
         { name = "CRDB_DSN_FORENSICS_READER", valueFrom = "${var.ssm_prefix}/crdb-dsn-forensics" },

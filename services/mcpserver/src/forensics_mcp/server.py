@@ -81,7 +81,10 @@ def _bearer_wrapped_app():
             await send({"type": "http.response.body", "body": b"ok"})
             return
         if scope["type"] == "http":
-            headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
+            headers = {
+                k.decode("latin-1").lower(): v.decode("latin-1")
+                for k, v in scope.get("headers", [])
+            }
             supplied = headers.get("authorization", "")
             if not hmac.compare_digest(supplied, f"Bearer {token}"):
                 await send({"type": "http.response.start", "status": 401, "headers": []})
