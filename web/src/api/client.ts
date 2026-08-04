@@ -80,11 +80,12 @@ export function createHttpClient(base = ''): DemoApi {
       await request<LiveInversionJob>(b, 'POST', '/api/inversion/live', { embedding: embeddingB64 })
       const deadline = Date.now() + 360_000
       for (;;) {
+        // Deadline BEFORE the poll, so a hung status request can never extend the wait.
+        if (Date.now() > deadline) throw new ApiError(0, 'live inversion timed out; try again')
         await new Promise((r) => setTimeout(r, 4000))
         const job = await request<LiveInversionJob>(b, 'GET', '/api/inversion/live/status')
         if (job.state === 'done' && job.result) return job.result
         if (job.state === 'error') throw new ApiError(0, job.error ?? 'live inversion failed')
-        if (Date.now() > deadline) throw new ApiError(0, 'live inversion timed out; try again')
       }
     },
     getAgentConfig() {

@@ -379,10 +379,18 @@ func (s *Server) handleDemoInversionLive(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
-	job := s.demo.StartLiveInversion(req.Embedding)
-	if job.State == "error" {
+	job, err := s.demo.StartLiveInversion(req.Embedding)
+	if errors.Is(err, demo.ErrLiveInversionBusy) {
+		// A different embedding's run is in flight; refusing (the old sync path's wording) beats
+		// silently answering this subject's poll with another subject's inversion.
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "the GPU is busy with another live inversion; try again in a moment",
+		})
+		return
+	}
+	if err != nil {
 		// A start-time validation error (bad payload); GPU-side failures ride the status poll.
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": job.Error})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusAccepted, job)
