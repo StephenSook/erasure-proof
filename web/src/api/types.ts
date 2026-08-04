@@ -128,6 +128,15 @@ export interface LiveInversion {
   [key: string]: unknown
 }
 
+// LiveInversionJob is the poll-visible state of the background live inversion. Start-then-poll:
+// the GPU run (cold start plus the inversion) outlasts CloudFront's 60s origin read ceiling, so
+// the client starts the job and polls short status requests instead of holding one long response.
+export interface LiveInversionJob {
+  state: 'idle' | 'running' | 'done' | 'error'
+  result?: LiveInversion
+  error?: string
+}
+
 // ApiError carries the HTTP status so callers can distinguish 404 (not found yet) from real faults.
 export class ApiError extends Error {
   status: number

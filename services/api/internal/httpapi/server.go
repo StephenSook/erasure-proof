@@ -55,6 +55,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/inversion", s.handleDemoInversion)
 	mux.HandleFunc("GET /api/inversion/config", s.handleDemoInversionConfig)
 	mux.HandleFunc("POST /api/inversion/live", s.handleDemoInversionLive)
+	mux.HandleFunc("GET /api/inversion/live/status", s.handleDemoInversionLiveStatus)
 	mux.HandleFunc("POST /api/verify-chain", s.handleDemoVerifyChain)
 	mux.HandleFunc("POST /api/rbac-demo", s.handleDemoRbac)
 	mux.HandleFunc("GET /api/tree-head", s.handleDemoTreeHead)
@@ -366,6 +367,10 @@ func (s *Server) handleDemoInversionConfig(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, v)
 }
 
+// handleDemoInversionLive STARTS the background live inversion and returns immediately. A live GPU
+// run is 1 to 2.5 minutes (cold start plus the run), longer than CloudFront's 60s origin read
+// ceiling, so the old synchronous response 504'd at the edge before the origin could answer. The
+// browser polls /api/inversion/live/status; every request stays short.
 func (s *Server) handleDemoInversionLive(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Embedding string `json:"embedding"`
@@ -374,30 +379,17 @@ func (s *Server) handleDemoInversionLive(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
-	// Live inversion runs a real GPU model (cold start + the run, ~1-2.5 min). Order the deadlines
-	// Modal worker (300s) < cryptod wait (320s) < cryptod HTTP client (330s) < this handler (340s)
-	// so the innermost layer always finishes first and no layer abandons GPU work it already billed.
-	ctx, cancel := context.WithTimeout(r.Context(), 340*time.Second)
-	defer cancel()
-	v, err := s.demo.InversionLive(ctx, req.Embedding)
-	if errors.Is(err, demo.ErrLiveInversionBusy) {
-		writeJSON(w, http.StatusTooManyRequests, map[string]string{
-			"error": "the GPU is busy with another live inversion; try again in a moment",
-		})
+	job := s.demo.StartLiveInversion(req.Embedding)
+	if job.State == "error" {
+		// A start-time validation error (bad payload); GPU-side failures ride the status poll.
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": job.Error})
 		return
 	}
-	if errors.Is(err, demo.ErrLiveInversionBudget) {
-		writeJSON(w, http.StatusTooManyRequests, map[string]string{
-			"error": "the live-inversion hourly budget is used up; the recorded run is always available",
-		})
-		return
-	}
-	if err != nil {
-		log.Printf("httpapi: live inversion failed: %v", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "live inversion unavailable"})
-		return
-	}
-	writeJSON(w, http.StatusOK, v)
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (s *Server) handleDemoInversionLiveStatus(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, s.demo.LiveInversionStatus())
 }
 
 // handleErasureStream is a Server-Sent Events endpoint: it sends the current decision log as a

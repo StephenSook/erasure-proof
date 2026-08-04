@@ -15,7 +15,7 @@ import {
   type IngestResult,
   type InversionConfig,
   type InversionGoldenRun,
-  type LiveInversion,
+  type LiveInversionJob,
   type MemoryView,
   type MemoryWriterResult,
   type ProofView,
@@ -73,8 +73,19 @@ export function createHttpClient(base = ''): DemoApi {
     getInversionConfig() {
       return request<InversionConfig>(b, 'GET', '/api/inversion/config')
     },
-    liveInversion(embeddingB64) {
-      return request<LiveInversion>(b, 'POST', '/api/inversion/live', { embedding: embeddingB64 })
+    async liveInversion(embeddingB64) {
+      // Start-then-poll: the GPU run (cold start + inversion, 1 to 2.5 min) outlasts CloudFront's
+      // 60s origin ceiling, so one long POST 504s at the edge. The server runs the job in the
+      // background; every request here stays short. Same shape as the agent warm loop.
+      await request<LiveInversionJob>(b, 'POST', '/api/inversion/live', { embedding: embeddingB64 })
+      const deadline = Date.now() + 360_000
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 4000))
+        const job = await request<LiveInversionJob>(b, 'GET', '/api/inversion/live/status')
+        if (job.state === 'done' && job.result) return job.result
+        if (job.state === 'error') throw new ApiError(0, job.error ?? 'live inversion failed')
+        if (Date.now() > deadline) throw new ApiError(0, 'live inversion timed out; try again')
+      }
     },
     getAgentConfig() {
       return request<AgentConfig>(b, 'GET', '/api/agent/config')

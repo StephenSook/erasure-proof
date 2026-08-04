@@ -669,3 +669,46 @@ func TestInversionLive_ConcurrencyGuard(t *testing.T) {
 	}
 	close(gate) // release the two goroutines
 }
+
+func TestLiveInversionJob_StartPollsToDone_SingleFlight(t *testing.T) {
+	release := make(chan struct{})
+	entered := make(chan struct{}, 2)
+	svc := demo.New(&store.Store{}, stubInverter{entered: entered, liveWait: release})
+
+	// A bad payload errors at start time (the START request carries it, never a poll).
+	if job := svc.StartLiveInversion("not-base64!"); job.State != "error" {
+		t.Fatalf("bad payload: want error state, got %+v", job)
+	}
+
+	emb := base64.StdEncoding.EncodeToString(bytesRepeat(0x33, 3072))
+	if job := svc.StartLiveInversion(emb); job.State != "running" {
+		t.Fatalf("start: want running, got %+v", job)
+	}
+	<-entered // the background run is now holding its GPU slot
+	// A second start while one runs is single-flight: it reports the running job and does not
+	// bill a second GPU container.
+	if job := svc.StartLiveInversion(emb); job.State != "running" {
+		t.Fatalf("second start: want running, got %+v", job)
+	}
+	if job := svc.LiveInversionStatus(); job.State != "running" {
+		t.Fatalf("status mid-run: want running, got %+v", job)
+	}
+	close(release)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		job := svc.LiveInversionStatus()
+		if job.State == "done" {
+			if job.Result["recovered_text"] != "name" {
+				t.Fatalf("done result: %+v", job.Result)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job never reached done; last %+v", job)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if extra := len(entered); extra != 0 {
+		t.Fatalf("expected exactly one GPU call, found %d extra", extra)
+	}
+}
