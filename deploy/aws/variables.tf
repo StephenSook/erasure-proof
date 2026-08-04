@@ -90,6 +90,18 @@ variable "modal_embed_url" {
   default     = ""
 }
 
+variable "agents_llm_url" {
+  description = "OpenAI-compatible open-model endpoint for the live agent beats (llama.cpp on Modal). Empty keeps the honest recorded fallback. Requires <ssm_prefix>/agents-llm-secret in SSM."
+  type        = string
+  default     = ""
+}
+
+variable "agents_llm_model" {
+  description = "Model label sent to the open-model endpoint and shown in provenance."
+  type        = string
+  default     = "qwen2.5-3b-instruct"
+}
+
 variable "s3_retain_days" {
   description = <<-EOT
     Per-object Object Lock retention days cryptod stamps on anchored proofs. 1 for GOVERNANCE

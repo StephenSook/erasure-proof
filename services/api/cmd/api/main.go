@@ -75,6 +75,24 @@ func main() {
 		}
 	}
 
+	// Fallback provider: when Bedrock is not wired (a new AWS account ships with a zero Bedrock
+	// quota), an OpenAI-compatible open-model endpoint serves the same agent beats through the
+	// same Converser, and every on-screen result is labeled with the provider that answered.
+	if demoSvc.ForensicsProvider() == "" && os.Getenv("AGENTS_LLM_URL") != "" {
+		oc, oErr := agent.NewOpenAIConverse()
+		if oErr != nil {
+			log.Printf("warning: AGENTS_LLM_URL set but open-model client init failed: %v", oErr)
+		} else {
+			demoSvc.SetForensicsConverser(oc)
+			demoSvc.SetForensicsProvenance("live_open_model",
+				"Live open-model tool-use audit ("+oc.Model()+" via llama.cpp on a Modal serverless "+
+					"GPU; Bedrock's new-account quota is zero, so the fallback provider answers). The "+
+					"verdict cites only what the read-only tools returned; evidence_proven is our own "+
+					"check of the trace.")
+			log.Print("live open-model forensics agent enabled (fallback provider)")
+		}
+	}
+
 	srv := httpapi.New(st, orch, ingester, demoSvc, os.Getenv("GIT_SHA"))
 
 	// One reconcile pass at boot: erasures whose post-commit anchor failed (crash, KMS or S3

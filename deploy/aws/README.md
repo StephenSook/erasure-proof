@@ -45,11 +45,13 @@ AWS_PROFILE=erasure-admin aws ssm put-parameter --type SecureString \
   --name /erasure-proof/ecdsa-signing-key --value file://certs/dev-signing-key.pem
 AWS_PROFILE=erasure-admin aws ssm put-parameter --type SecureString \
   --name /erasure-proof/modal-invert-secret --value '<Modal inversion bearer secret>'
+AWS_PROFILE=erasure-admin aws ssm put-parameter --type SecureString \
+  --name /erasure-proof/agents-llm-secret --value '<open-model endpoint bearer secret>'
 ```
 
-All four parameters must exist BEFORE `tofu apply`: they ride into the containers as ECS
+All five parameters must exist BEFORE `tofu apply`: they ride into the containers as ECS
 secrets, and ECS fails task startup if any referenced parameter is missing. (The ecdsa key
-parameter became optional once KMS signing landed; the stack still reads the other three.)
+parameter became optional once KMS signing landed; the stack still reads the other four.)
 
 ## Validate (free, no AWS calls)
 
