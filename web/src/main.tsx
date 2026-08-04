@@ -10,6 +10,14 @@ import './styles/fonts.css'
 import './styles/tokens.css'
 import './styles/app.css'
 
+// PWA install surface: the service worker is a pure network passthrough (no caching, so the
+// trust surfaces never serve stale evidence); production only, so dev reloads stay clean.
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    void navigator.serviceWorker.register('/sw.js').catch(() => undefined)
+  })
+}
+
 const root = document.getElementById('root')
 if (!root) {
   throw new Error('root element not found')
