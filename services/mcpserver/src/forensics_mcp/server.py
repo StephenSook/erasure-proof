@@ -103,10 +103,14 @@ def main() -> None:
             raise SystemExit("MCP_BEARER is required for the streamable-http transport")
         import uvicorn
 
+        # Read the bind address from our own env, not the SDK settings: the FASTMCP_* env prefix
+        # did not reach mcp.settings in the deployed container (observed: uvicorn bound
+        # 127.0.0.1:8000 and the load balancer health checks failed), and an explicit read has no
+        # such failure mode.
         uvicorn.run(
             _bearer_wrapped_app(),
-            host=mcp.settings.host,
-            port=mcp.settings.port,
+            host=os.getenv("FASTMCP_HOST", "127.0.0.1"),
+            port=int(os.getenv("FASTMCP_PORT", "8000")),
             log_level="info",
         )
         return
