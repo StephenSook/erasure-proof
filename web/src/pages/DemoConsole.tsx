@@ -609,9 +609,15 @@ export function DemoConsole() {
               : 'Have the AI agent prove the erasure'}
           </button>
         </div>
-        {state.agentStatus === 'running' && state.agentAvailable && (
+        {state.agentStatus === 'running' && state.agentAvailable && state.agentWarming && (
           <div className="note">
-            Claude is calling the read-only forensic tools, one at a time, to decide whether the
+            The model container is warming (a scale-to-zero GPU boots on demand, roughly 30 to 60
+            seconds from cold). The audit starts automatically the moment it is ready.
+          </div>
+        )}
+        {state.agentStatus === 'running' && state.agentAvailable && !state.agentWarming && (
+          <div className="note">
+            The agent is calling the read-only forensic tools, one at a time, to decide whether the
             erasure is provable. It can only cite what the tools return.
           </div>
         )}
@@ -622,7 +628,7 @@ export function DemoConsole() {
               items={[
                 { k: 'verdict', v: String(audit.verdict ?? ''), tone: provenByEvidence ? 'ok' : 'bad' },
                 { k: 'evidence proves erasure', v: provenByEvidence ? 'yes' : 'no', tone: provenByEvidence ? 'ok' : 'bad' },
-                { k: 'source', v: audit.source === 'live_bedrock' ? 'live Claude on Bedrock' : 'recorded (agent not wired)', tone: audit.source === 'live_bedrock' ? 'ok' : undefined },
+                { k: 'source', v: audit.source === 'live_bedrock' ? 'live Claude on Bedrock' : audit.source === 'live_open_model' ? 'live open model (Qwen2.5-3B, llama.cpp on a Modal GPU)' : 'recorded (agent not wired)', tone: audit.source?.startsWith('live') ? 'ok' : undefined },
                 { k: 'rounds', v: String(audit.rounds ?? '') },
               ]}
             />

@@ -90,6 +90,7 @@ type Service struct {
 	forensicsConverser  agent.Converser
 	forensicsSource     string
 	forensicsDisclosure string
+	warmingActive       bool
 	forensicsSem        chan struct{}
 	forensicsMu         sync.Mutex
 	forensicsHits       []time.Time
@@ -110,6 +111,51 @@ func New(s *store.Store, inverter Inverter) *Service {
 		now:           time.Now,
 		forensicsSem:  make(chan struct{}, 1),
 	}
+}
+
+// warmer is implemented by providers with a scale-to-zero cold start (the open-model fallback).
+type warmer interface{ Warm(context.Context) bool }
+
+// WarmForensics reports whether the live agent's model is ready to answer, and on a cold miss
+// kicks ONE background warming poll (single-flight) so the container boots while the judge is
+// still reading the page. Bedrock has no cold start and always reads warm.
+func (s *Service) WarmForensics(ctx context.Context) bool {
+	if s.forensicsConverser == nil {
+		return false
+	}
+	w, ok := s.forensicsConverser.(warmer)
+	if !ok {
+		return true
+	}
+	if w.Warm(ctx) {
+		return true
+	}
+	s.forensicsMu.Lock()
+	starting := !s.warmingActive
+	if starting {
+		s.warmingActive = true
+	}
+	s.forensicsMu.Unlock()
+	if starting {
+		go func() {
+			defer func() {
+				s.forensicsMu.Lock()
+				s.warmingActive = false
+				s.forensicsMu.Unlock()
+			}()
+			deadline := time.Now().Add(4 * time.Minute)
+			for time.Now().Before(deadline) {
+				wctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				ready := w.Warm(wctx)
+				cancel()
+				if ready {
+					return
+				}
+				time.Sleep(5 * time.Second)
+			}
+		}()
+	}
+	return false
 }
 
 // SetForensicsProvenance overrides the Source/Disclosure stamped on live agent results, so a

@@ -62,6 +62,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/consistency", s.handleDemoConsistency)
 	mux.HandleFunc("GET /api/erasure-stream", s.handleErasureStream)
 	mux.HandleFunc("GET /api/agent/config", s.handleAgentConfig)
+	mux.HandleFunc("GET /api/agent/warm", s.handleAgentWarm)
 	mux.HandleFunc("POST /api/agent/forensics", s.handleAgentForensics)
 	mux.HandleFunc("POST /api/agent/memory-writer", s.handleAgentMemoryWriter)
 	mux.HandleFunc("POST /api/embedding/titan", s.handleTitanEmbed)
@@ -507,6 +508,15 @@ func (s *Server) handleAgentConfig(w http.ResponseWriter, r *http.Request) {
 		"titan_available":         s.demo.TitanAvailable(),
 		"provider":                s.demo.ForensicsProvider(),
 	})
+}
+
+// handleAgentWarm reports whether the live agent's model is ready, kicking a background warm on a
+// cold miss; the UI polls it and holds the run button until warm, so the actual audit request
+// always fits inside CloudFront's origin timeout.
+func (s *Server) handleAgentWarm(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, map[string]any{"warm": s.demo.WarmForensics(ctx)})
 }
 
 func (s *Server) handleTimeTravel(w http.ResponseWriter, r *http.Request) {

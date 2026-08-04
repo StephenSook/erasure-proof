@@ -6,6 +6,7 @@
 import { bytesToHex, hexToBytes, merkleLeafHash } from '../verify'
 import {
   type AgentConfig,
+  type AgentWarm,
   ApiError,
   type ChainResult,
   type ConsistencyView,
@@ -163,14 +164,18 @@ export function createMockClient(): DemoApi {
       }
     },
     async getAgentConfig(): Promise<AgentConfig> {
-      // The mock has no Bedrock; advertise the live agent as unavailable so the UI shows the
-      // recorded verdict. A real deploy with AGENTS_LIVE=1 flips this to true.
+      // The mock has no model provider; advertise the live agent as unavailable so the UI shows
+      // the recorded verdict. A real deploy with a wired provider flips this to true.
       return {
         live_available: false,
         forensics_available: false,
         memory_writer_available: false,
         titan_available: false,
       }
+    },
+    async agentWarm(): Promise<AgentWarm> {
+      // No cold start in the mock; the recorded path is always "warm".
+      return { warm: true }
     },
     async timeTravel(): Promise<TimeTravelView> {
       // Mirrors the real database's documented MVCC semantics (like the 42501 mock), labeled by

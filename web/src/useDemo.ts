@@ -32,11 +32,14 @@ export interface DemoState {
   liveStatus: 'idle' | 'running' | 'done' | 'error'
   liveError?: string
   liveAvailable?: boolean
-  // Live Bedrock forensics agent: the AI proves the erasure on screen.
+  // Live forensics agent: the AI proves the erasure on screen (Bedrock or the open-model fallback).
   agentAudit?: ForensicsAudit
   agentStatus: 'idle' | 'running' | 'done' | 'error'
   agentError?: string
   agentAvailable?: boolean
+  agentProvider?: string
+  // True while the scale-to-zero model container is still booting before an audit.
+  agentWarming?: boolean
   // Live Bedrock memory-writer: the AI distils + stores a memory the loop then erases.
   memWriter?: MemoryWriterResult
   memWriterStatus: 'idle' | 'running' | 'done' | 'error'
@@ -196,16 +199,22 @@ export function useDemo(injected?: DemoApi) {
     }
   }, [])
 
-  // Probe which live Bedrock agent features are wired.
+  // Probe which live agent features are wired, and which provider answers.
   const checkAgent = useCallback(async () => {
     try {
       const cfg = await clientRef.current!.getAgentConfig()
       setState((s) => ({
         ...s,
         agentAvailable: cfg.forensics_available ?? cfg.live_available,
+        agentProvider: cfg.provider,
         memWriterAvailable: cfg.memory_writer_available ?? false,
         titanAvailable: cfg.titan_available ?? false,
       }))
+      if (cfg.forensics_available ?? cfg.live_available) {
+        // Kick the scale-to-zero model's warming now, while the judge is still reading the page,
+        // so the run button is usually warm by the time it is clicked. Fire-and-forget.
+        void clientRef.current!.agentWarm().catch(() => undefined)
+      }
     } catch {
       setState((s) => ({ ...s, agentAvailable: false, memWriterAvailable: false, titanAvailable: false }))
     }
@@ -271,12 +280,27 @@ export function useDemo(injected?: DemoApi) {
     }
     setState((s) => ({ ...s, agentStatus: 'running', agentError: undefined }))
     try {
+      // Hold the audit until the scale-to-zero model is warm, so the audit request itself always
+      // fits inside CloudFront's origin timeout. The warm poll both reports and kicks warming;
+      // the recorded/mock path answers warm immediately.
+      const warmDeadline = Date.now() + 150_000
+      for (;;) {
+        const { warm } = await clientRef.current!.agentWarm()
+        if (warm) break
+        if (Date.now() > warmDeadline) {
+          throw new Error('The model container is still warming; try again in a moment.')
+        }
+        setState((s) => ({ ...s, agentWarming: true }))
+        await new Promise((r) => setTimeout(r, 4000))
+      }
+      setState((s) => ({ ...s, agentWarming: false }))
       const audit = await clientRef.current!.forensicsAudit(id)
       setState((s) => ({ ...s, agentAudit: audit, agentStatus: 'done' }))
     } catch (e) {
       setState((s) => ({
         ...s,
         agentStatus: 'error',
+        agentWarming: false,
         agentError: e instanceof Error ? e.message : String(e),
       }))
     }

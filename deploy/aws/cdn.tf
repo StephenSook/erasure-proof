@@ -67,6 +67,10 @@ resource "aws_cloudfront_distribution" "main" {
       https_port             = 443
       origin_protocol_policy = "http-only" # no custom domain = no ACM cert on the ALB; see README
       origin_ssl_protocols   = ["TLSv1.2"]
+      # The live agent audit runs a multi-round tool loop; 60s is CloudFront's no-quota maximum.
+      # The warm endpoint keeps the cold start OUT of this window (the UI holds until warm).
+      origin_read_timeout      = 60
+      origin_keepalive_timeout = 60
     }
     custom_header {
       name  = "X-Origin-Verify"
