@@ -18,7 +18,8 @@ defend, and every limitation is stated proactively.
   say "serializable".
 - C-SPANN vector indexing was a public preview (L2/Euclidean-only) in v25.2; the current stable docs
   (v26.2) no longer mark it preview and document L2, cosine, and inner-product distance. We use L2
-  (Euclidean) `<->` search; our cluster runs v25.4 LTS.
+  (Euclidean) `<->` search; our cluster started on v25.4 LTS and the Basic tier auto-upgraded it to
+  v26.2.1 (transcript: `infra/ccloud/cluster-version-2026-08-04.json`).
 - Row-Level Security is incompatible with change-data-capture queries on the same table, and
   changefeeds do not filter by RLS. We run changefeeds on non-RLS audit tables.
 - Tamper-evidence is app-side hash chaining plus S3 Object Lock. CockroachDB has no native

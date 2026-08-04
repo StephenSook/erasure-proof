@@ -30,9 +30,14 @@ const tiers: { cap: string; status: string; note: string }[] = [
     note: 'Real Raft on a local 3-node cluster; managed cloud nodes cannot be killed. Recorded and labeled.',
   },
   {
+    cap: 'Live AI forensics agent + memory-writer',
+    status: 'Live (open model)',
+    note: 'A real tool-use loop over the read-only forensic tools, served by an open model (Qwen2.5-3B, llama.cpp on a Modal serverless GPU). Every on-screen verdict labels the provider that answered; Bedrock becomes primary if AWS grants the new-account quota.',
+  },
+  {
     cap: 'Titan v2 side-by-side embedding',
-    status: 'Wired live (deploy)',
-    note: 'Live Bedrock call on the deployed console. Titan has no public inverter today; the panel states that this is an accident of tooling, not a safety guarantee.',
+    status: 'Bedrock quota-gated',
+    note: 'The code and IAM are wired, but AWS ships new accounts with a zero Bedrock quota and our increase is pending, so the panel shows its honest unavailable state. Titan has no public inverter today; the panel states that this is an accident of tooling, not a safety guarantee.',
   },
 ]
 
@@ -102,6 +107,7 @@ export function Trust() {
         <li>Serializable, not strictly serializable (Jepsen confirmed CockroachDB lacks the latter).</li>
         <li>C-SPANN vector indexing was a preview (L2-only) in v25.2; the current stable docs (v26.2) no longer mark it preview and document L2, cosine, and inner-product distance. We use L2 search.</li>
         <li>Append-only holds against the agent and operator roles, not the owner/admin credential.</li>
+        <li>Row-Level Security is incompatible with change-data-capture queries on the same table, and changefeeds do not filter by RLS; our changefeed runs on the non-RLS decision log only.</li>
         <li>Crypto-erasure is irreversible only with no persisted plaintext key and no escrowed or backed-up key copies.</li>
         <li>The closest prior art for the encrypted-vector primitive is CyborgDB; the contribution here is the combination (crypto-erased embedding + atomically retained decision log + externally anchored signed proof).</li>
       </ul>

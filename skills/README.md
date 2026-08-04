@@ -7,10 +7,10 @@ repository.
 
 - [`verifying-cryptographic-erasure`](verifying-cryptographic-erasure/SKILL.md): builds and verifies
   the destroy-and-retain crypto-erasure pattern on CockroachDB (per-subject key destruction inside
-  one SERIALIZABLE transaction that also retains a hash-chained decision log). Validated against the
-  upstream `scripts/validate-spec.py` (zero errors; the two remaining warnings are naive-substring
-  false positives the upstream exemplars also trigger, the gerund check and the "AI Act" -> "i "
-  match).
+  one SERIALIZABLE transaction that also retains a hash-chained decision log). Validated against
+  the upstream `scripts/validate-spec.py` during authoring: zero errors, two naive-substring
+  warnings the upstream exemplars also trigger (the gerund check and the "AI Act" -> "i " match).
+  The validator lives upstream, not in this repo, so re-run it there to reproduce.
 
 ## Upstream contribution
 
