@@ -60,8 +60,8 @@ of truth and is mirrored on the app `/trust` page.
 | RFC 6962 Merkle transparency log, root signed into proofs | wired-live | `/api/tree-head`, `/api/inclusion`, browser verify |
 | Browser-side proof verification (`/proof/:id`) | wired-live | WebCrypto over the exact stored canonical bytes |
 | Row-level security scoping the agent per subject | wired-live | fail-closed; full matrix asserted in CI |
-| Read-only forensics MCP server (4 tools, audit-logged) | wired-live | plus the live forensics agent (open-model or Bedrock) over the same tools |
-| Managed MCP Server verification path | integration | `infra/ccloud/mcp-verify.sh`: a spec-shaped MCP client run against the live cluster; CI gating is the next hardening step |
+| Read-only forensics MCP server (4 tools, audit-logged) | wired-live | DEPLOYED judge-connectable over streamable HTTP at the demo URL's `/mcp` (bearer-gated; token in the judge-only submission field); the live forensics agent runs over the same tools |
+| Managed MCP Server verification path | wired-live | `infra/ccloud/mcp-verify.sh` runs as a nightly CI gate (`verify-cloud.yml`); both MCP paths report the same chain head |
 | ccloud service-account RBAC boundaries | wired-live | `infra/ccloud/rbac-demo.sh`: control-plane 403 and data-plane 42501 execute live; the MCP-authz boundary is documented in the script header |
 | Atomic erasure surviving a node kill | integration | local 3-node rig (managed cloud nodes cannot be killed by us) |
 | Vec2Text name-then-noise inversion | integration | recorded golden run (Modal T4), reproducible; live InvalidTag is the proof |
