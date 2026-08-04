@@ -16,6 +16,11 @@ resource "aws_cloudwatch_log_group" "cryptod" {
   retention_in_days = 7
 }
 
+resource "aws_cloudwatch_log_group" "mcpserver" {
+  name              = "/ecs/${local.name}/mcpserver"
+  retention_in_days = 7
+}
+
 resource "aws_ecs_task_definition" "core" {
   family                   = "${local.name}-core"
   requires_compatibilities = ["FARGATE"]
@@ -100,6 +105,34 @@ resource "aws_ecs_task_definition" "core" {
         }
       }
     },
+    {
+      # The judge-connectable read-only forensics MCP server: SELECT-only role, SQL guard,
+      # read-only session, audit log on every call, judge bearer checked in-process. essential
+      # false: the console must not die if the forensics endpoint has a bad day.
+      name         = "mcpserver"
+      image        = var.mcpserver_image
+      essential    = false
+      portMappings = [{ containerPort = 8082, protocol = "tcp" }]
+      environment = [
+        { name = "MCP_TRANSPORT", value = "streamable-http" },
+        { name = "FASTMCP_HOST", value = "0.0.0.0" },
+        { name = "FASTMCP_PORT", value = "8082" },
+        # The DNS-rebinding guard must know the public Host header CloudFront presents.
+        { name = "MCP_ALLOWED_HOSTS", value = aws_cloudfront_distribution.main.domain_name },
+      ]
+      secrets = [
+        { name = "CRDB_DSN_FORENSICS_READER", valueFrom = "${var.ssm_prefix}/crdb-dsn-forensics" },
+        { name = "MCP_BEARER", valueFrom = "${var.ssm_prefix}/mcp-bearer" },
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.mcpserver.name
+          awslogs-region        = var.region
+          awslogs-stream-prefix = "mcpserver"
+        }
+      }
+    },
   ])
 }
 
@@ -120,6 +153,12 @@ resource "aws_ecs_service" "core" {
     target_group_arn = aws_lb_target_group.api.arn
     container_name   = "api"
     container_port   = 8080
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.mcp.arn
+    container_name   = "mcpserver"
+    container_port   = 8082
   }
 
   deployment_circuit_breaker {

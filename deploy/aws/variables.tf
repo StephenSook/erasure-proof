@@ -26,6 +26,11 @@ variable "cryptod_image" {
   type        = string
 }
 
+variable "mcpserver_image" {
+  description = "Full ECR image URI for the forensics MCP server container (pushed before apply). Requires <ssm_prefix>/crdb-dsn-forensics and <ssm_prefix>/mcp-bearer in SSM."
+  type        = string
+}
+
 variable "kms_wrapping_key_arn" {
   description = "The existing fleet wrapping CMK (created 2026-07-10, alias/erasure-proof-wrapping)."
   type        = string

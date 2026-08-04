@@ -18,6 +18,15 @@ resource "aws_ecr_repository" "cryptod" {
   }
 }
 
+resource "aws_ecr_repository" "mcpserver" {
+  name                 = "${local.name}-mcpserver"
+  image_tag_mutability = "IMMUTABLE"
+  force_delete         = true
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+}
+
 # Keep only the last 5 images per repo (storage pennies, but no unbounded growth).
 locals {
   ecr_expiry_policy = jsonencode({
@@ -41,5 +50,10 @@ resource "aws_ecr_lifecycle_policy" "api" {
 
 resource "aws_ecr_lifecycle_policy" "cryptod" {
   repository = aws_ecr_repository.cryptod.name
+  policy     = local.ecr_expiry_policy
+}
+
+resource "aws_ecr_lifecycle_policy" "mcpserver" {
+  repository = aws_ecr_repository.mcpserver.name
   policy     = local.ecr_expiry_policy
 }

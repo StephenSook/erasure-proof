@@ -64,3 +64,42 @@ resource "aws_lb_listener_rule" "origin_verified" {
     target_group_arn = aws_lb_target_group.api.arn
   }
 }
+
+# The judge-connectable forensics MCP server rides the same task on 8082. Its target-group health
+# probe uses the token-exempt /mcp/health path; every real MCP request additionally carries the
+# judge bearer, checked inside the container.
+resource "aws_lb_target_group" "mcp" {
+  name        = "${local.name}-mcp"
+  port        = 8082
+  protocol    = "HTTP"
+  target_type = "ip"
+  vpc_id      = data.aws_vpc.default.id
+
+  health_check {
+    path                = "/mcp/health"
+    interval            = 30
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+  }
+}
+
+resource "aws_lb_listener_rule" "mcp_origin_verified" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 5 # more specific than the catch-all api rule; both require the origin header
+
+  condition {
+    path_pattern {
+      values = ["/mcp", "/mcp/*"]
+    }
+  }
+  condition {
+    http_header {
+      http_header_name = "X-Origin-Verify"
+      values           = [random_password.origin_verify.result]
+    }
+  }
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.mcp.arn
+  }
+}
