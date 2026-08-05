@@ -132,7 +132,8 @@ export interface LiveInversion {
 // the GPU run (cold start plus the inversion) outlasts CloudFront's 60s origin read ceiling, so
 // the client starts the job and polls short status requests instead of holding one long response.
 export interface LiveInversionJob {
-  state: 'idle' | 'running' | 'done' | 'error'
+  id?: string
+  state: 'idle' | 'running' | 'done' | 'error' | 'superseded'
   result?: LiveInversion
   error?: string
 }

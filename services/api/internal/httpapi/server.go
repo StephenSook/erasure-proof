@@ -396,8 +396,11 @@ func (s *Server) handleDemoInversionLive(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusAccepted, job)
 }
 
-func (s *Server) handleDemoInversionLiveStatus(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.demo.LiveInversionStatus())
+// The ?job= parameter is the id returned by the start call. Presenting it means a caller can only
+// be handed the result of the run it actually started; omitting it keeps the endpoint usable by
+// hand (curl) and returns whatever job is current.
+func (s *Server) handleDemoInversionLiveStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.demo.LiveInversionStatus(r.URL.Query().Get("job")))
 }
 
 // handleErasureStream is a Server-Sent Events endpoint: it sends the current decision log as a

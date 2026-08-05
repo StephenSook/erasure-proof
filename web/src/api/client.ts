@@ -77,15 +77,22 @@ export function createHttpClient(base = ''): DemoApi {
       // Start-then-poll: the GPU run (cold start + inversion, 1 to 2.5 min) outlasts CloudFront's
       // 60s origin ceiling, so one long POST 504s at the edge. The server runs the job in the
       // background; every request here stays short. Same shape as the agent warm loop.
-      await request<LiveInversionJob>(b, 'POST', '/api/inversion/live', { embedding: embeddingB64 })
+      const started = await request<LiveInversionJob>(b, 'POST', '/api/inversion/live', {
+        embedding: embeddingB64,
+      })
+      // Poll by the job id we were given, so a run started by someone else after ours finished can
+      // never be handed back to us as if it were our result.
+      const q = started.id ? `?job=${encodeURIComponent(started.id)}` : ''
       const deadline = Date.now() + 360_000
       for (;;) {
         // Deadline BEFORE the poll, so a hung status request can never extend the wait.
         if (Date.now() > deadline) throw new ApiError(0, 'live inversion timed out; try again')
         await new Promise((r) => setTimeout(r, 4000))
-        const job = await request<LiveInversionJob>(b, 'GET', '/api/inversion/live/status')
+        const job = await request<LiveInversionJob>(b, 'GET', `/api/inversion/live/status${q}`)
         if (job.state === 'done' && job.result) return job.result
-        if (job.state === 'error') throw new ApiError(0, job.error ?? 'live inversion failed')
+        if (job.state === 'error' || job.state === 'superseded') {
+          throw new ApiError(0, job.error ?? 'live inversion failed')
+        }
       }
     },
     getAgentConfig() {

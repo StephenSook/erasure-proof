@@ -229,19 +229,33 @@ func (a *ForensicsAgent) dispatch(ctx context.Context, tu ToolUse, subjectID str
 	case "verify_hash_chain":
 		return a.tools.VerifyHashChain(ctx)
 	case "check_erasure_proof":
-		return a.tools.CheckErasureProof(ctx, argSubject(tu.Input, subjectID))
+		return withScopeNote(tu.Input, subjectID, a.tools.CheckErasureProof(ctx, subjectID))
 	case "confirm_key_destroyed":
-		return a.tools.ConfirmKeyDestroyed(ctx, argSubject(tu.Input, subjectID))
+		return withScopeNote(tu.Input, subjectID, a.tools.ConfirmKeyDestroyed(ctx, subjectID))
 	default:
 		return map[string]any{"error": fmt.Sprintf("unknown tool %q", tu.Name)}
 	}
 }
 
-// argSubject reads the model's subject_id argument, falling back to the audited subject if the model
-// omitted it (the audit is always scoped to one subject, so this is safe and avoids a dead round).
-func argSubject(input map[string]any, fallback string) string {
-	if v, ok := input["subject_id"].(string); ok && v != "" {
-		return v
+// withScopeNote enforces that every tool runs against the subject the CALLER asked about, never a
+// subject the model named, and records it in the trace when the model asked for a different one.
+//
+// The audit is scoped to exactly one subject by the caller. Previously the model's subject_id
+// argument won, which meant a hallucinated or prompt-injected argument could run the evidence tools
+// against a DIFFERENT subject and return "destroyed: true" for someone else, while the verdict was
+// presented as being about the requested subject. EvidenceProven reads those same tool outputs, so
+// that path could manufacture a PROVEN verdict from another subject's evidence. The scope is now
+// enforced in code rather than asserted in a comment, and the override is surfaced as evidence
+// rather than hidden, because the trace is what the UI shows and what we ask judges to trust.
+func withScopeNote(input map[string]any, subjectID string, out map[string]any) map[string]any {
+	asked, ok := input["subject_id"].(string)
+	if ok && asked != "" && asked != subjectID {
+		if out == nil {
+			out = map[string]any{}
+		}
+		out["scope_override"] = fmt.Sprintf(
+			"the model asked for subject %q; this audit is scoped to %q, so the tool ran against the audited subject",
+			asked, subjectID)
 	}
-	return fallback
+	return out
 }
