@@ -11,6 +11,10 @@
 [![AWS](https://img.shields.io/badge/AWS-KMS%20%C2%B7%20S3%20Object%20Lock%20%C2%B7%20Bedrock-232F3E.svg?logo=amazonaws&logoColor=white)](./deploy/aws)
 [![NIST SP 800-88r2](https://img.shields.io/badge/NIST-SP_800--88r2_crypto_erase-0b5394.svg)](https://csrc.nist.gov/pubs/sp/800/88/r2/final)
 
+**[Watch the 3-minute demo](https://youtu.be/H_aBRrRbl_E)**: the live GPU inversion recovering a
+name from a stored vector, the serializable crypto-erase, the signed proof, a node kill, the live
+forensics agent's verdict, and the same proof verifying offline on an iPhone and an Android phone.
+
 When a regulator asks whether a person's data is truly gone from an AI agent's memory, most
 systems can only prove they deleted a row. Deleting the row is not enough: the embedding is still
 reconstructible. Text-embedding inversion (Vec2Text, Morris et al., arXiv:2310.06816) recovers
