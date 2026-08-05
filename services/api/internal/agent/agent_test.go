@@ -159,3 +159,59 @@ func TestAudit_ConverseErrorPropagates(t *testing.T) {
 		t.Errorf("want the converse error to propagate, got %v", err)
 	}
 }
+
+// A hallucinated or prompt-injected subject_id must never redirect the evidence tools. Before this
+// was enforced in code, the model's argument won, so a tool could report "destroyed: true" about a
+// DIFFERENT subject while the verdict was presented as being about the audited one, and
+// EvidenceProven reads those same outputs, so it could manufacture a PROVEN verdict from someone
+// else's evidence. The audited subject must win, and the attempt must be visible in the trace.
+func TestAudit_ModelSuppliedSubjectCannotRedirectTheEvidenceTools(t *testing.T) {
+	const audited = "the-audited-subject"
+	tools := &fakeTools{}
+	conv := &fakeConverser{steps: []agent.Result{
+		toolUseStep("check_erasure_proof", map[string]any{"subject_id": "some-other-subject"}),
+		{StopReason: "end_turn", Text: "VERDICT: PROVEN"},
+	}}
+	res, err := agent.NewForensicsAgent(conv, tools, 4).Audit(context.Background(), audited)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if len(res.ToolCalls) != 1 {
+		t.Fatalf("want 1 tool call, got %d", len(res.ToolCalls))
+	}
+	out := res.ToolCalls[0].Output
+
+	// The tool must have run against the AUDITED subject, not the one the model named.
+	if got := out["subject"]; got != audited {
+		t.Errorf("tool ran against %v, want the audited subject %q", got, audited)
+	}
+	// And the override attempt must be recorded as evidence, not silently dropped.
+	note, ok := out["scope_override"].(string)
+	if !ok || note == "" {
+		t.Errorf("expected a scope_override note in the trace, got %#v", out)
+	}
+	if !strings.Contains(note, "some-other-subject") || !strings.Contains(note, audited) {
+		t.Errorf("scope_override note should name both subjects, got %q", note)
+	}
+}
+
+// The ordinary case: when the model omits subject_id, the audited subject is still used.
+func TestAudit_OmittedSubjectUsesTheAuditedSubjectWithoutANote(t *testing.T) {
+	const audited = "subject-under-audit"
+	tools := &fakeTools{}
+	conv := &fakeConverser{steps: []agent.Result{
+		toolUseStep("check_erasure_proof", map[string]any{}),
+		{StopReason: "end_turn", Text: "VERDICT: PROVEN"},
+	}}
+	res, err := agent.NewForensicsAgent(conv, tools, 4).Audit(context.Background(), audited)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	out := res.ToolCalls[0].Output
+	if got := out["subject"]; got != audited {
+		t.Errorf("tool ran against %v, want %q", got, audited)
+	}
+	if _, present := out["scope_override"]; present {
+		t.Errorf("no override happened, so no note should be added: %#v", out)
+	}
+}

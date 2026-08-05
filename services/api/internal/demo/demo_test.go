@@ -694,13 +694,13 @@ func TestLiveInversionJob_StartPollsToDone_SingleFlight(t *testing.T) {
 	if _, err := svc.StartLiveInversion(other); !errors.Is(err, demo.ErrLiveInversionBusy) {
 		t.Fatalf("different embedding mid-run: want ErrLiveInversionBusy, got %v", err)
 	}
-	if job := svc.LiveInversionStatus(); job.State != "running" {
+	if job := svc.LiveInversionStatus(""); job.State != "running" {
 		t.Fatalf("status mid-run: want running, got %+v", job)
 	}
 	close(release)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		job := svc.LiveInversionStatus()
+		job := svc.LiveInversionStatus("")
 		if job.State == "done" {
 			if job.Result["recovered_text"] != "name" {
 				t.Fatalf("done result: %+v", job.Result)
@@ -714,5 +714,44 @@ func TestLiveInversionJob_StartPollsToDone_SingleFlight(t *testing.T) {
 	}
 	if extra := len(entered); extra != 0 {
 		t.Fatalf("expected exactly one GPU call, found %d extra", extra)
+	}
+}
+
+// A caller polls by the id it was given. Once its job finishes and a DIFFERENT embedding starts a
+// new one, the old poller must be told its run was superseded rather than handed the new run's
+// result, which is what an id-less status endpoint would do.
+func TestLiveInversionStatus_DoesNotServeAnotherJobsResult(t *testing.T) {
+	svc := demo.New(&store.Store{}, stubInverter{})
+	first := base64.StdEncoding.EncodeToString(bytesRepeat(0x51, 3072))
+	second := base64.StdEncoding.EncodeToString(bytesRepeat(0x52, 3072))
+
+	a, err := svc.StartLiveInversion(first)
+	if err != nil {
+		t.Fatalf("first start: %v", err)
+	}
+	if a.ID == "" {
+		t.Fatal("start must return a job id")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for svc.LiveInversionStatus(a.ID).State != "done" {
+		if time.Now().After(deadline) {
+			t.Fatal("first job never finished")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	b, err := svc.StartLiveInversion(second)
+	if err != nil {
+		t.Fatalf("second start: %v", err)
+	}
+	if b.ID == a.ID {
+		t.Fatal("the second job must have its own id")
+	}
+	if got := svc.LiveInversionStatus(a.ID); got.State != "superseded" {
+		t.Errorf("the first caller polling its own id got state %q with result %v; want superseded",
+			got.State, got.Result)
+	}
+	if got := svc.LiveInversionStatus(b.ID); got.State == "superseded" {
+		t.Error("the second caller must still be able to read its own job")
 	}
 }

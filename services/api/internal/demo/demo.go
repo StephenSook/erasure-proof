@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"log"
 	"regexp"
 	"strings"
@@ -791,8 +792,13 @@ func (s *Service) InversionLive(ctx context.Context, embeddingB64 string) (map[s
 // 1 to 2.5 minutes (cold start plus the inversion), longer than CloudFront's 60s origin read
 // ceiling, so a synchronous response 504s at the edge before the origin answers. The browser
 // starts the job and polls short status requests instead.
+// ID identifies THIS job. A poller must present it, so a caller can only ever be handed the
+// result of the run it actually started: once a job finishes, a later start for a different
+// embedding replaces it, and without an id the first caller's next poll would read the second
+// caller's result.
 type LiveInversionJob struct {
-	State  string         `json:"state"` // idle | running | done | error
+	ID     string         `json:"id,omitempty"`
+	State  string         `json:"state"` // idle | running | done | error | superseded
 	Result map[string]any `json:"result,omitempty"`
 	Error  string         `json:"error,omitempty"`
 }
@@ -814,7 +820,8 @@ func (s *Service) StartLiveInversion(embeddingB64 string) (LiveInversionJob, err
 		}
 		return LiveInversionJob{}, ErrLiveInversionBusy
 	}
-	s.liveInvJob = LiveInversionJob{State: "running"}
+	jobID := uuid.NewString()
+	s.liveInvJob = LiveInversionJob{ID: jobID, State: "running"}
 	s.liveInvJobInput = embeddingB64
 	go func() {
 		// Same deadline layering as the sync path: Modal worker 300s < cryptod 320s/330s < 340s.
@@ -825,23 +832,29 @@ func (s *Service) StartLiveInversion(embeddingB64 string) (LiveInversionJob, err
 		defer s.liveInvJobMu.Unlock()
 		switch {
 		case errors.Is(err, ErrLiveInversionBusy):
-			s.liveInvJob = LiveInversionJob{State: "error", Error: "the GPU is busy with another live inversion; try again in a moment"}
+			s.liveInvJob = LiveInversionJob{ID: jobID, State: "error", Error: "the GPU is busy with another live inversion; try again in a moment"}
 		case errors.Is(err, ErrLiveInversionBudget):
-			s.liveInvJob = LiveInversionJob{State: "error", Error: "the live-inversion hourly budget is used up; the recorded run is always available"}
+			s.liveInvJob = LiveInversionJob{ID: jobID, State: "error", Error: "the live-inversion hourly budget is used up; the recorded run is always available"}
 		case err != nil:
 			log.Printf("demo: live inversion failed: %v", err)
-			s.liveInvJob = LiveInversionJob{State: "error", Error: "live inversion unavailable"}
+			s.liveInvJob = LiveInversionJob{ID: jobID, State: "error", Error: "live inversion unavailable"}
 		default:
-			s.liveInvJob = LiveInversionJob{State: "done", Result: v}
+			s.liveInvJob = LiveInversionJob{ID: jobID, State: "done", Result: v}
 		}
 	}()
 	return s.liveInvJob, nil
 }
 
-// LiveInversionStatus reports the current job for the polling endpoint.
-func (s *Service) LiveInversionStatus() LiveInversionJob {
+// LiveInversionStatus reports the job the caller started. An empty id returns the current job
+// (backwards compatible for a curl user), but a caller that presents an id and finds a DIFFERENT
+// job now current gets "superseded" rather than someone else's result.
+func (s *Service) LiveInversionStatus(jobID string) LiveInversionJob {
 	s.liveInvJobMu.Lock()
 	defer s.liveInvJobMu.Unlock()
+	if jobID != "" && s.liveInvJob.ID != "" && s.liveInvJob.ID != jobID {
+		return LiveInversionJob{ID: jobID, State: "superseded",
+			Error: "another live inversion replaced this one; start a new run"}
+	}
 	return s.liveInvJob
 }
 
