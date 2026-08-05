@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.repository == 'StephenSook/erasure-proof'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Chain head through cockroachlabs.cloud/mcp
         env:
           CCLOUD_SA_API_KEY: ${{ secrets.CCLOUD_SA_API_KEY }}
@@ -50,7 +50,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.repository == 'StephenSook/erasure-proof'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install cockroach binary (data-plane boundary needs the SQL client)
         run: |
           set -euo pipefail
@@ -74,7 +74,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.repository == 'StephenSook/erasure-proof'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Exercise the judged path end to end
         env:
           JUDGE_URL: ${{ secrets.JUDGE_URL }}
