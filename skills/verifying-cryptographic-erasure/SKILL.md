@@ -190,9 +190,10 @@ DROP POLICY IF EXISTS agent_subject_scope ON agent_memory;
 **Skill references:**
 - [SQL queries for erasure and chain verification](references/sql-queries.md)
 
-**Related skills:**
-- [hardening-user-privileges](../hardening-user-privileges/SKILL.md): least-privilege RBAC that this pattern depends on
-- [preparing-compliance-documentation](../preparing-compliance-documentation/SKILL.md): assembling the audit evidence for a regulator
+**Related skills** (upstream domain neighbours this pattern composes with; not carried in this
+repository, which ships this skill only):
+- `hardening-user-privileges`: least-privilege RBAC that this pattern depends on
+- `preparing-compliance-documentation`: assembling the audit evidence for a regulator
 
 **Official CockroachDB Documentation:**
 - [Transactions and SERIALIZABLE isolation](https://www.cockroachlabs.com/docs/stable/transactions.html)
