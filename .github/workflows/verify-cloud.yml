@@ -8,6 +8,13 @@
 # least-privilege service account. Job 2 proves two RBAC boundaries live: the control-plane
 # 200-vs-403 split on one key, and the data-plane 42501 append-only denial from the database
 # itself. Offset cron minute per scheduler-throttling guidance; a failed run emails the owner.
+#
+# Job 3 (judge-path) answers the question uptime monitoring cannot: the Route53 health check and
+# the keepalive both assert /healthz, so the app can read green while a JUDGED BEAT has silently
+# degraded, most plausibly the live agent falling back to the recorded verdict when the
+# scale-to-zero GPU worker is unreachable. That failure is invisible to every other monitor and a
+# judge would be the first to see it. This job runs the same loop the Autopilot button runs and
+# asserts on the server's own evidence, not on model prose.
 
 name: verify-cloud
 
@@ -19,6 +26,7 @@ on:
     branches: [main]
     paths:
       - "infra/ccloud/**"
+      - "infra/judge-path-verify.sh"
       - ".github/workflows/verify-cloud.yml"
 
 permissions:
@@ -57,3 +65,26 @@ jobs:
           bash infra/ccloud/rbac-demo.sh | tee /tmp/rbac.out
           grep -q "PASS: same key, 200 on its scoped cluster" /tmp/rbac.out
           grep -q "PASS: SQLSTATE 42501" /tmp/rbac.out
+
+  judge-path:
+    # Skips itself rather than failing when JUDGE_URL is unset (before deploy, or on a fork), so a
+    # missing secret never looks like a broken judge path. The URL is judge-only per the
+    # organizers, so it is a SECRET, not a variable: Actions logs on this public repo are public,
+    # and secrets are exact-value masked.
+    runs-on: ubuntu-latest
+    if: github.repository == 'StephenSook/erasure-proof'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Exercise the judged path end to end
+        env:
+          JUDGE_URL: ${{ secrets.JUDGE_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${JUDGE_URL:-}" ]; then
+            echo "JUDGE_URL secret is not set; skipping the judge-path check."
+            exit 0
+          fi
+          bash infra/judge-path-verify.sh | tee /tmp/judge-path.out
+          # The script already exits non-zero on any failed assertion. Gate on the final line too,
+          # so a future edit that returns 0 early cannot silently pass this job.
+          grep -q "^PASS: judge path healthy" /tmp/judge-path.out

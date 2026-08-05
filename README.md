@@ -98,7 +98,7 @@ and [COMPLIANCE.md](COMPLIANCE.md) for the GDPR Article 17 vs EU AI Act Article 
 db/            schema migrations and named SQL queries (README)
 services/      api (Go) + cryptod, mcpserver, agents (Python)  (README)
 web/           React + Vite frontend                            (README)
-deploy/local/  local 3-node CockroachDB cluster + HAProxy       (README)
+deploy/        local 3-node cluster + HAProxy, and the AWS stack (README)
 infra/         ccloud RBAC scaffolding + AWS smoke script       (README)
 spikes/        the three week-one gating experiments + findings (README)
 tests/         guide to where each guarantee is tested          (README)
@@ -293,6 +293,30 @@ bash infra/ccloud/rbac-demo.sh  # the three RBAC denial boundaries, live
 ```
 
 The three week-one spikes live in `spikes/` and gate the build; see each `findings.md`.
+
+## Run the tests
+
+These are the exact commands CI runs, and they need nothing beyond the toolchain: no database, no
+AWS credentials, no `.env`. Verified from a clean `git clone` on 2026-08-05.
+
+```bash
+# Go: the erasure transaction, the hash chain, the Merkle tree, the agent tool loop
+cd services/api && go test ./...
+
+# Python: AES-256-GCM envelope, KMS envelope + signing, the anchor, the proof document
+cd services/cryptod && uv venv --python 3.12 && uv pip install -e ".[dev]" numpy && uv run pytest -q
+
+# Web: the demo state machine, the API client, the in-browser proof verifier
+cd web && npm ci && npx vitest run
+
+# Mobile: offline P-256 verification, byte-parity with the browser verifier
+cd mobile && npm ci && npm test
+```
+
+The `[dev]` extra is required for the Python suite; a bare `uv sync` installs runtime dependencies
+only and the tests will not collect. The tests that need a live CockroachDB (the SERIALIZABLE
+erasure under real concurrency, the append-only 42501 denial, the node-kill durability gate) run in
+CI against a real cluster; see `tests/README.md` for which guarantee each one covers.
 
 ## License
 

@@ -82,5 +82,8 @@ Fabricated or falsified during research; never write these anywhere:
 
 ## Reporting
 
+Report a vulnerability privately to stephensookra@gmail.com. Please do not open a public issue for
+a security problem. Expect a reply within 72 hours.
+
 This is a hackathon project, not production software. Do not store real third-party personal data
 in it. The demo uses the author's own self-consented data.
