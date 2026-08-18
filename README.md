@@ -40,7 +40,7 @@ database that stores the memory in the first place.
 |---|---|
 | Web console | DEPLOYED: one CloudFront URL (provided to judges via the submission form), S3 + Fargate + KMS + S3 Object Lock behind it; also runs locally, see [Setup and run](#setup-and-run) |
 | Read-only forensics MCP server | four audit-logged tools over the official MCP SDK (`services/mcpserver`), CI-tested against a real CockroachDB; runs via stdio or streamable HTTP |
-| Offline mobile verifier | real now: Expo / React Native, pure-JS P-256, verifies an erasure certificate with no server and no network; Android APK via `eas build`, iOS via the simulator ([mobile/](mobile/)) |
+| Offline mobile verifier | real now: Expo / React Native, pure-JS P-256, verifies an erasure certificate with no server and no network; shipped as a public [iOS TestFlight beta](https://testflight.apple.com/join/Kxe3eKhQ) and a signed [Android APK release](https://github.com/StephenSook/erasure-proof/releases/tag/verifier-v1.0.0) ([mobile/](mobile/)) |
 | Full stack, locally | runs today via [Setup and run](#setup-and-run) |
 
 ## The one closeable loop
